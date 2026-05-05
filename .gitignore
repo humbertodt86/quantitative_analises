@@ -1,0 +1,69 @@
+# === Dados ===
+*.parquet
+data/
+data/ticks/
+*.npz
+*.npy
+*.csv
+*.json
+
+# === Binários e Executáveis ===
+*.exe
+*.zip
+*.ico
+*.dll
+*.so
+*.dylib
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# === Logs e Temporários ===
+logs/
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# === Pastas Antigas / Não-funcionais ===
+Bases/
+Config/
+Profiles/
+Sounds/
+memory/
+memoria_sessao/
+mt5_referencias_Indicators/
+relatorios_mt5/
+research/
+_mt5_ini_tmp/
+log_mt5_testador_estrategia/
+
+# === MT5 Arquivos do Terminal ===
+MetaEditor64.exe
+metatester64.exe
+terminal64.exe
+uninstall.exe
+
+# === Cópias Antigas ===
+rn_backtest.zip
+rn_backtest/
+
+# === IDE ===
+.vscode/
+.idea/
+*.sublime-*
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini

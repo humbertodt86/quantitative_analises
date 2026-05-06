@@ -27,6 +27,12 @@ FIX: Exit tick-a-tick (engine_v119_v2.py):
   - Antes: usava max(ask_bar)/min(bid_bar) da candle inteira -> PnL superestimado
   - Agora: itera tick por tick, sai no PRIMEIRO que cruza SL/TP
   - Correlacao F2 vs F3 apos fix: >0.99
+
+FIX 2026-05-05: TP usa tick real (nao threshold fixo):
+  - Antes: pnl = current_tp (threshold fixo, superestimava/underestimava)
+  - Agora: pnl = round(bt - ep) para BUY, pnl = round(ep - at) para SELL
+  - Tambem corrigido _simulate_exit_ohlc: usa high/low real em vez de tp_pts fixo
+  - SL ja usava tick real, agora TP tambem usa -> consistencia total
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

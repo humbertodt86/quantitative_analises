@@ -1,8 +1,9 @@
 # Documentacao dos Engines
 
-**Versao:** V7.5.0
+**Versao:** V7.6.0
 **Engine Principal:** `backtest/engine_v2.py`
 **Engine Tick-Level:** `backtest/engine_v119_v2.py`
+**F1 Pre-Filtro:** `engines/f1_binario_v4_hybrid.py`
 
 ---
 
@@ -249,6 +250,75 @@ pnl, hit_type, mfe, mae, exit_idx, candles_in_trade, \
     'voting_modes': str,
 }
 ```
+
+---
+
+## F1 Fast Screener (Pre-Filtro)
+
+### F1HybridEngine V5
+
+Motor ultra-rapido para screening de configs. Usa APENAS candles OHLC (sem tick samples).
+
+```python
+from engines.f1_binario_v4_hybrid import F1HybridEngine
+
+engine = F1HybridEngine(
+    high, low, close, ep, atr, sell_idx,
+    direction=-1, n_threads=8
+)
+
+# Grid search completo
+net_grid, n_grid = engine.evaluate_batch(tp_grid, sl_grid, blocking_mode='single')
+
+# Top-N apenas (sem alocar matriz completa)
+top_100 = engine.evaluate_batch_topn(tp_grid, sl_grid, top_n=100)
+
+engine.shutdown()
+```
+
+**Velocidades:**
+- 1T (single): ~15K combos/s
+- 8T (single): ~55K combos/s
+- 8T (exact): ~39K combos/s
+
+**Blocking modes:**
+- `single`: bloqueia 1 candle (fast path, ~5x mais rapido)
+- `exact`: bloqueia duracao real do trade (mais conservador)
+
+**Diferencas F1 vs F2 vs F3 (OOS Semana 20-29 Abr 2026, SEM guardrails):**
+| Motor | Dados | Blocking | Trades vs F2 | Correlacao PnL vs F2 |
+|-------|-------|----------|--------------|----------------------|
+| F1-Single | OHLC | 1 candle | **2-28x mais** | Baixa (distorcido) |
+| F1-Exact | OHLC | duracao real | **1.0x (identico)** | **+0.998 (perfeita)** |
+| F2 | OHLC | cooldown saida | baseline | baseline |
+| F3 | Ticks (bid/ask) | cooldown saida | ~1.0x | **+0.987 (alta)** |
+
+**Descobertas:**
+1. **F1-Exact = F2 (praticamente identicos):** Correlaacao +0.998. PnL total semana: F1-E = -3,990 vs F2 = -3,990.
+2. **F1-Single gera 2-28x mais trades:** No dia 28/04, F1-S fez 28 trades vs 1 do F2. **Nunca use F1-Single para rankeamento.**
+3. **F3 ≈ F2 (correlacao +0.987):** Com filtro inline de ticks invalidos + fallback high/low, F3 se alinha com F2.
+4. **Ticks da plataforma tem problemas:** ~0.001% com preco 0, ~0.001% com valores absurdos (>200K quando preco ~195K). **Filtro inline obrigatorio.**
+5. **~12% das candles nao tem tick do high/low real** (amostragem incompleta). Fallback para candle OHLC eh essencial.
+
+**Filtro Inline no F3 (`_simulate_exit_v119`):**
+```python
+# Ignora ticks invalidos (<=0 ou fora do range da candle +/- 1000 pts)
+if bt <= 0 or bt < float(cj["low"]) - 1000 or bt > float(cj["high"]) + 1000:
+    continue
+
+# Fallback: se nenhum tick valido cruzou, usa high/low da candle
+if float(cj["high"]) >= ep + current_tp:
+    pnl = round(float(cj["high"]) - ep); hit_type="TP"
+if float(cj["low"]) <= effective_sl:
+    pnl = max(round(float(cj["low"]) - ep), -hard_stop); hit_type="SL"
+```
+
+**Regras:**
+- Use **F1-Exact** como pre-filtro (blocking='exact', SEM guardrails)
+- **F2** valida top 10 do F1 (SEM guardrails, apenas TP/SL fixos)
+- **F3** e o "Juiz Final" COM guardrails otimizados (BE/HP/TP30)
+- NAO pre-processar ticks externos — use filtro inline
+- NAO comparar PnL absoluto F2 vs F3 quando F3 tem guardrails ativos
 
 ---
 

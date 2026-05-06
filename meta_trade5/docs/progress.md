@@ -1,5 +1,332 @@
 # Progress Report — WIN/WDO Marathon
 
+## 2026-05-06 — Ciclo 3: Grid Conservador (4,032 combos) + Filtros F1 (SL Floor + R:R Cap)
+
+**Objetivo:** Voltar ao grid conservador e adicionar filtros de sanity no F1 para evitar overfit de micro-stop e precision overfit.
+
+**Grid conservador:**
+- TP: 12 valores [1.0 a 20.0]
+- SL: 8 valores [0.5 a 5.0]
+- ATR_MIN: 6 valores [50 a 400]
+- ATR_MAX: 7 valores [400 a 9999]
+- **Total: 12 x 8 x 6 x 7 = 4,032 combos**
+
+**Filtros F1 (novos):**
+- SL floor >= 0.5x ATR (remove micro-stop overfit)
+- R:R cap <= 10 (prevents precision overfit)
+- Resultado: de 4,032 raw combos, 3,570 passaram nos filtros (88.5% pass rate)
+
+**Performance Ciclo 3 (4,032 combos, ~310 entradas):**
+| Variante | F1 Tempo | F1 Net | F2 Net (IS) | OOS Net | OOS WR | Config |
+|----------|----------|--------|-------------|---------|--------|--------|
+| SIGNAL_DIR_BASE | **0.00s** | -625 | +10,205 (217t) | **-2,050** (66t, WR=42.4%) | TP=1.5 SL=5.0 BE=999999 |
+| SIGNAL_DIR_V2 | **0.00s** | +970 | +3,820 (15t) | **+1,350** (4t, WR=50.0%) | TP=2.5 SL=1.0 BE=100 |
+| SIGNAL_DIR_DEPRECATED | **0.01s** | -555 | +11,310 (220t) | **-1,840** (68t, WR=42.6%) | TP=1.5 SL=5.0 BE=999999 |
+| S0_Z30_R05 | **0.00s** | -625 | +10,205 (217t) | **-2,050** (66t, WR=42.4%) | TP=1.5 SL=5.0 BE=999999 |
+| S5_Z30_R05 | **0.01s** | -580 | +10,420 (212t) | **-1,450** (64t, WR=43.8%) | TP=1.5 SL=5.0 BE=999999 |
+| S10_Z30_R05 | **0.01s** | -210 | +185 (112t) | **-4,795** (29t, WR=20.7%) | TP=2.5 SL=0.5 BE=999999 |
+| S20_Z30_R05 | **0.01s** | +2,075 | +10,065 (204t) | **-2,935** (61t, WR=41.0%) | TP=1.5 SL=5.0 BE=999999 |
+
+**Comparacao dos 3 Ciclos:**
+| Variante | OOS (5.4K) | OOS (54K) | OOS (4K+filtros) | Melhor? |
+|----------|------------|-----------|------------------|---------|
+| BASE | -2,050 | -2,950 | **-2,050** | Grid 5K/4K |
+| V2 | -230 | +575 | **+1,350** | Grid 4K+filtros |
+| DEPRECATED | -1,840 | -2,220 | **-1,840** | Grid 5K/4K |
+| S5 | -1,450 | -3,000 | **-1,450** | Grid 5K/4K |
+| S10 | -1,450 | -3,995 | **-4,795** | Grid 5K |
+| S20 | -2,935 | -6,790 | **-2,935** | Grid 5K/4K |
+
+**Aprendizados Ciclo 3:**
+1. **Grid conservador + filtros teve resultados idênticos ao grid 5K original** para 5/7 variantes. Os filtros SL>=0.5x e RR<=10 não eliminaram nenhum combo relevante do grid original (88.5% pass rate).
+2. **SIGNAL_DIR_V2 melhorou de -230 → +1,350** — mas ainda com apenas 4 trades OOS, não significativo.
+3. **S10_Z30_R05 piorou drasticamente** (-1,450 → -4,795) — o filtro SL>=0.5x removeu o combo SL=0.3 que funcionava no IS, mas no OOS o SL=0.5 foi pior.
+4. **BE convergiu para 999999 (desabilitado)** em 6/7 variantes — o BE está matando performance no IS.
+5. **F1 processou 4,032 combos em ~0.01s** — speedup continua massivo.
+
+**Variantes no parquet:** 123 colunas de PA_SIGNAL_DIR existem no `super_win_continuous.parquet`.
+
+**Arquivos:**
+- `docs/WIN_docs/signal_variants_results_20260506_074542.json` — Resultados do grid conservador
+
+---
+
+## 2026-05-06 — Ciclo com Grid Expandido (~54K combos = 10x)
+
+**Objetivo:** Expandir o grid F1 de 5,400 para ~54,000 combos (10x) e re-executar as 7 variantes PA_SIGNAL_DIR.
+
+**Grid expandido:**
+- TP: 26 valores [0.5 a 60.0]
+- SL: 23 valores [0.03 a 25.0]
+- ATR_MIN: 9 valores [25 a 600]
+- ATR_MAX: 10 valores [300 a 15000]
+- **Total: 26 x 23 x 9 x 10 = 53,820 combos**
+
+**Performance F1 (53,820 combos, 310 entradas):**
+| Variante | F1 Tempo | F1 Net | F2 Net (IS) | OOS Net | OOS WR |
+|----------|----------|--------|-------------|---------|--------|
+| SIGNAL_DIR_BASE | **0.02s** | +17,625 | +8,905 (440t) | **-2,950** (152t, WR=48.0%) |
+| SIGNAL_DIR_V2 | **0.01s** | +4,605 | +3,855 (17t) | **+575** (5t, WR=60.0%) |
+| SIGNAL_DIR_DEPRECATED | **0.02s** | +17,970 | +7,390 (493t) | **-2,220** (159t, WR=48.4%) |
+| S0_Z30_R05 | **0.03s** | +17,625 | +8,905 (440t) | **-2,950** (152t, WR=48.0%) |
+| S5_Z30_R05 | **0.02s** | +17,670 | +8,145 (431t) | **-3,000** (153t, WR=47.7%) |
+| S10_Z30_R05 | **0.02s** | +17,150 | +8,810 (439t) | **-3,995** (149t, WR=45.6%) |
+| S20_Z30_R05 | **0.02s** | +19,595 | +9,855 (387t) | **-6,790** (123t, WR=43.9%) |
+
+**Comparacao Grid Pequeno (5,400) vs Grid Grande (53,820):**
+| Variante | OOS (5K) | OOS (54K) | Delta | Config (54K) |
+|----------|----------|-----------|-------|--------------|
+| BASE | -2,050 | -2,950 | -900 | TP=1.5 SL=25.0 |
+| V2 | -230 | +575 | +805 | TP=3.5 SL=20.0 |
+| DEPRECATED | -1,840 | -2,220 | -380 | TP=1.5 SL=25.0 |
+| S5 | -1,450 | -3,000 | -1,550 | TP=1.5 SL=25.0 |
+| S10 | -1,450 | -3,995 | -2,545 | TP=1.5 SL=25.0 |
+| S20 | -2,935 | -6,790 | -3,855 | TP=1.5 SL=25.0 |
+
+**Aprendizados:**
+1. **Grid expandido encontrou configs com SL muito alto (25.0)** — isso gerou muito mais trades no IS (493t vs 220t para DEPRECATED) mas performance PIOR no OOS.
+2. **SIGNAL_DIR_V2 teve OOS positivo (+575)** mas apenas 5 trades — nao e estatisticamente significativo.
+3. **O guardrail convergiu para BE desabilitado (999999)** em todas as variantes.
+4. **F1 processou 53,820 combos em ~0.02s** — o bottleneck nao e mais o F1, mas sim F2/F3/Guardrail.
+5. **Liçao:** SL muito alto (>5.0x ATR) aumenta o trade count no IS mas degrada OOS. O grid pequeno (SL max=5.0) era mais conservador e teve melhor OOS.
+
+**Arquivos:**
+- `docs/WIN_docs/signal_variants_results_20260506_014250.json` — Resultados do grid expandido
+
+---
+
+## 2026-05-05 — Orchestrator V7.6: F1HybridEngine Integrado + Ciclo de Variantes PA_SIGNAL_DIR
+
+**Objetivo:** Substituir F1 legado (`f1_fast_screener`) pelo `F1HybridEngine` no orchestrator e executar ciclo completo para 7 variantes de PA_SIGNAL_DIR.
+
+**Mudancas no Orchestrator (`scripts/orchestrator.py`):**
+1. **Import:** `engines.f1_binario_v4_hybrid.F1HybridEngine` (antes: `f1_fast_screener.evaluate`)
+2. **Dados F1:** Extrai `high_fev`, `low_fev`, `close_fev` do `df_fev` (OHLC). Nao usa mais `M_fev` (tick samples).
+3. **F1 Grid:** De 5,400 chamadas individuais para **1 chamada vetorizada** (`evaluate_batch` com 180 combos TPxSL) + expansao de metadados ATR_MIN/ATR_MAX.
+4. **Bug corrigido:** Indentacao do guardrail sweep estava errada (loop `for hp_c` continha `gr_results.sort` no mesmo nivel, causando execucao multipla).
+5. **Blocking:** Sempre `blocking_mode='exact'` (correlacao +0.998 com F2).
+
+**Performance F1 (7 variantes, 310 entradas cada):**
+| Variante | F1 Tempo | F1 Net | F2 Net (IS) | OOS Net |
+|----------|----------|--------|-------------|---------|
+| SIGNAL_DIR_BASE | **0.01s** | -625 | +10,205 (217t) | -2,050 (66t, WR=42.4%) |
+| SIGNAL_DIR_V2 | **0.01s** | +700 | +4,485 (15t) | -230 (4t, WR=50.0%) |
+| SIGNAL_DIR_DEPRECATED | **0.01s** | -555 | +11,310 (220t) | -1,840 (68t, WR=42.6%) |
+| S0_Z30_R05 | **0.01s** | -625 | +10,205 (217t) | -2,050 (66t, WR=42.4%) |
+| S5_Z30_R05 | **0.01s** | -580 | +10,420 (212t) | -1,450 (64t, WR=43.8%) |
+| S10_Z30_R05 | **0.01s** | -570 | +10,575 (210t) | -1,450 (64t, WR=43.8%) |
+| S20_Z30_R05 | **0.01s** | +2,075 | +10,065 (204t) | -2,935 (61t, WR=41.0%) |
+
+**Speedup F1:** De ~15s (legado, loop 5,400 chamadas) para **~0.01s** (Hybrid, 1 chamada vetorizada) — **~1,500x speedup**.
+
+**Observacoes do Ciclo:**
+- **Nenhuma variante teve OOS positivo** no periodo Abr/2026. Tendencia de short nao tem edge neste momento.
+- **SIGNAL_DIR_V2** produziu apenas 15 trades no IS (sinal muito raro), indicando que a variante e muito restritiva.
+- **Guardrails:** Todas as variantes convergiram para `BE=999999` (efetivamente desabilitado), `HP=1`, `CD=0`. O BE nao melhorou o OOS.
+- **Melhor OOS:** S5_Z30_R05 e S10_Z30_R05 (menor perda: -1,450 pts).
+- **F1 como pre-filtro:** F1 net nao prediz OOS (S20 teve melhor F1 mas pior OOS).
+
+**Arquivos:**
+- `scripts/orchestrator.py` — V7.6, F1HybridEngine integrado
+- `scripts/run_signal_variants.py` — Batch executor para multiplas variantes
+- `docs/cycle_plan.md` — Plano detalhado do ciclo
+- `docs/WIN_docs/signal_variants_results_20260505_230152.json` — Resultados consolidados
+
+---
+
+## 2026-05-05 — F1 Hybrid V5: 55K combos/s com Pool Persistente de Threads
+
+**Problema:** F1 v1 (loop numba) processava apenas ~15K combos/s. Meta era 50K combos/s para grids de 500K combos.
+
+**Solucao:** `engines/f1_binario_v4_hybrid.py` — F1HybridEngine com:
+1. **Evaluate vetorizado otimizado**: computa TP-hit e SL-hit independentemente, depois combina com `min(fi_tp, fi_sl)`
+2. **Blocking fast path**: modo `single` usa variavel `skip` (4.7x mais rapido que bit-packing uint64)
+3. **Pool persistente**: `ThreadPoolExecutor` criado no `__init__`, reutilizado para N chamadas
+
+**Resultados (Grid 140x140 = 19,600 combos, Fev 2026):**
+| Motor | Modo | Tempo | Combos/s | vs v1 |
+|-------|------|-------|----------|-------|
+| F1 v1 | single | 1.09s | 17,924 | baseline |
+| **Hybrid 8T** | **single** | **0.36s** | **54,718** | **3.0x** |
+| Hybrid 8T | exact | 0.51s | 38,766 | 2.6x |
+
+**Validacao:**
+- Spearman Hybrid vs v1 = **1.0** (rankeamento identico)
+- Max diff PnL = 0, max diff trades = 0
+
+**Comparacao F1 vs F2 vs F3 (OOS 28/04/2026):**
+| Motor | Trades | PnL | Metodo de Saida |
+|-------|--------|-----|-----------------|
+| F1-Hyb-S | 28 | +12,355 | close[c] (tick last da candle) |
+| F1-Hyb-E | 1 | +730 | close[c] + blocking exact |
+| F2 | 1 | +666 | Threshold fixo |
+| F3 | 2 | +4,065 | Tick real (bid/ask) |
+
+**Nota:** F1 single gera ~2x mais trades que F2 (esperado — blocking por entrada, nao por saida). Serve como pre-filtro, nao substitui F2/F3.
+
+**Arquivos:**
+- `engines/f1_binario_v4_hybrid.py` — NOVO (F1HybridEngine)
+- `engines/f1_binario.py` — baseline (preservado)
+- `engines/arquivados/` — versoes antigas movidas (v2, v3, v4, v4b, ohlc, deprecated, f2_optimization_v87)
+- `scripts/benchmark_f1_hybrid.py` — benchmark completo
+- `scripts/comparar_hybrid_f2_f3.py` — comparacao trade a trade OOS
+
+---
+
+## 2026-05-05 — F3: Filtro Inline de Ticks Inválidos + Fallback High/Low
+
+**Problema Identificado:**
+F3 (tick-level) gerava PnL absurdamente diferente do F2 (candle OHLC) em ~25% dos trades:
+- Dia 24/04: F2 = -640 | F3 = +20,460 (diferença de +21,100 pts!)
+- Correlacao F2 vs F3 = +0.043 (praticamente aleatorio)
+
+**Causa Raiz:**
+1. **Ticks com preco 0.0:** 9 ticks consecutivos em uma candle causavam SL falso (pnl = 0 - ep = -194,230)
+2. **Ticks absurdos (214,585):** 213 ticks com bid = 214,585 (o preco real estava ~195,000). Isso causava TP falso.
+3. **Falta de ticks nos extremos:** ~12% das candles nao tinham o tick do high/low real (amostragem incompleta)
+
+**Investigacao:**
+- Ticks originais: 17.4M ticks, 116 com preco 0, 213 com bid > 200,000
+- Ticks cleaned (pre-processados): quebraram o `_build_tick_index` (mapeamento de candles para indices errado)
+- Conclusao: **NAO pre-processar ticks externos.** Usar ticks originais + filtro INLINE.
+
+**Solucao:**
+Filtro inline no `_simulate_exit_v119` (`backtest/engine_v119_v2.py`):
+```python
+# Ignora ticks invalidos (<=0 ou fora do range da candle +/- 1000 pts)
+if bt <= 0 or bt < float(cj["low"]) - 1000 or bt > float(cj["high"]) + 1000:
+    continue
+```
+
+Fallback para high/low da candle quando nenhum tick valido cruza:
+```python
+if float(cj["high"]) >= ep + current_tp:
+    pnl = round(float(cj["high"]) - ep); hit_type="TP"
+if float(cj["low"]) <= effective_sl:
+    pnl = max(round(float(cj["low"]) - ep), -hard_stop); hit_type="SL"
+```
+
+**Resultados (Semana OOS 20-29 Abr, SEM guardrails):**
+| Dia | F1-Exact | F2 | F3 | Diff F3-F2 |
+|-----|----------|-----|-----|------------|
+| 20/04 | +1,690 | +1,625 | +1,645 | +20 |
+| 22/04 | -2,160 | -2,103 | -2,115 | -12 |
+| 23/04 | -1,390 | -1,398 | -875 | +523 |
+| 24/04 | -805 | -640 | -395 | +245 |
+| 27/04 | -875 | -975 | -980 | -5 |
+| 28/04 | +700 | +636 | +640 | +4 |
+| 29/04 | -1,150 | -1,135 | -1,135 | 0 |
+| **Total** | **-3,990** | **-3,990** | **-3,215** | **+775** |
+
+**Correlacoes (SEM guardrails):**
+- F1-Exact vs F2: **+0.998** ✅
+- F2 vs F3: **+0.987** ✅
+
+**Aprendizados:**
+1. **F1-Exact = F2** (correlacao +0.998) — use F1-Exact como pre-filtro confiavel
+2. **F3 ≈ F2** (correlacao +0.987) — com filtro inline de ticks invalidos + fallback
+3. **Ticks amostrados tem ~12% missing nos extremos** — fallback high/low eh essencial
+4. **Ticks com preco 0 ou absurdos existem nos dados da plataforma** — filtro inline obrigatorio
+5. **NAO pre-processar ticks externos** — quebra `_build_tick_index`, use filtro inline
+6. **F1-Single gera 2-28x mais trades que F2/F3** — usar apenas para exploracao, NAO para rankeamento
+7. **F3 com guardrails eh diferente por design** (BE/HP/TP30) — nao comparar PnL absoluto com F1/F2
+
+**Arquivos:**
+- `backtest/engine_v119_v2.py` — Filtro inline + fallback high/low
+- `scripts/comparar_com_guardrails.py` — Comparacao F1/F2/F3 com e sem guardrails
+- `scripts/investigar_trade_a_trade_24abr.py` — Investigacao trade a trade
+- `scripts/verificar_absurdos_por_candle.py` — Verificacao de ticks absurdos
+- `scripts/analise_qualidade_ticks.py` — Analise de qualidade dos ticks
+
+---
+
+## 2026-05-05 — Correção F3: TP agora usa Tick Real (não threshold fixo)
+
+**Problema Identificado:**
+O `_simulate_exit_v119` em `backtest/engine_v119_v2.py` usava **threshold fixo** para TP:
+```python
+# ANTES (threshold fixo — superestima/underestima PnL)
+pnl = current_tp  # p.ex. 1000 pts fixos
+```
+Enquanto o SL já usava tick real:
+```python
+pnl = max(round(bt - ep), -hard_stop)  # tick real
+```
+Isso causava inconsistência: TP usava preço teórico, SL usava preço real.
+
+**Solução:**
+Corrigido `backtest/engine_v119_v2.py`:
+
+1. `_simulate_exit_v119` (tick-a-tick, linhas 283-306):
+   - **BUY**: `pnl = round(bt - ep)` (bid real que cruzou TP)
+   - **SELL**: `pnl = round(ep - at)` (ask real que cruzou TP)
+
+2. `_simulate_exit_ohlc` (sem ticks, linhas 108-126):
+   - **BUY**: `pnl = int(float(cj["high"]) - ep)` (high real da candle)
+   - **SELL**: `pnl = int(ep - float(cj["low"]))` (low real da candle)
+
+**Comentários adicionados no código:**
+```python
+# CORRECAO 2026-05-05: TP agora usa preco real do tick (bt - ep),
+# nao threshold fixo (current_tp). O tick pode cruzar ACIMA do TP,
+# capturando slippage favoravel. SL ja usava tick real (bt - ep).
+```
+
+**Impacto:**
+- F3 agora captura **slippage favorável** quando o tick cruza além do TP
+- Em backtests OOS, isso pode aumentar PnL em ~5-15% para estratégias de momentum
+- Alinhamento consistente: tanto TP quanto SL usam preço do tick que cruzou
+
+**Validação (Dia 14/04/2026, BUY):**
+| Engine | Trades | PnL Bruto | Método de Saída |
+|--------|--------|-----------|-----------------|
+| F1 | 2 | +1,265 | `close[c]` (tick last da candle) |
+| F2 | 2 | +1,307 | Threshold fixo (`tp_price` / `sl_price`) |
+| F3 | 3 | +3,010 | **Tick real** (bid/ask) |
+
+**Arquivos:**
+- `backtest/engine_v119_v2.py` — CORRIGIDO (TP usa tick real)
+- `scripts/comparar_f1_f2_f3_alinhado.py` — script de comparação trade a trade
+
+---
+
+## 2026-05-05 — F1 Binario Refatorado: OHLC-Based (SEM Tick Samples)
+
+**Problema Arquitetural Identificado:**
+O IS (Jan-Mar 2026) NAO tem ticks sampleados disponiveis. Temos apenas:
+- Candles OHLC completos (`super_win_continuous.parquet`)
+- Ticks last brutos (`WIN_merged_all.parquet`) usados APENAS para calcular CVD/BOOK_IMB no build
+
+O F2 ja opera com high/low das candles (nao usa ticks dentro do loop de backtest).
+O F1 antigo (f1_fast_screener e f1_binario) usava `M` (matriz de 15 samples/candle) —
+que NAO existe para o IS e distorce o rankeamento (correlacao NEGATIVA com F2).
+
+**Solucao:**
+- `engines/f1_binario.py` reescrito para usar APENAS `high`, `low`, `close` arrays.
+- `evaluate_combo` agora itera sobre candles futuras e verifica `high >= tp_price` / `low <= sl_price`
+- PnL = threshold fixo (tp_pts ou -sl_pts), identico ao F2
+- Blocking `exact` (duracao real) eh o default, alinhado com F2
+
+**Arquivos:**
+- `engines/f1_binario.py` — NOVO (OHLC-based, sem tick samples)
+- `engines/f1_binario_deprecated.py` — backup da versao com samples
+- `scripts/validar_f1_novo_vs_f2.py` — validacao F1 vs F2
+- `scripts/correlacao_f1_novo_f2.py` — correlacao de rankeamento
+
+**Resultados (Fev 2026, BUY):**
+| Metrica | F1 Novo | F2 |
+|---------|---------|-----|
+| PnL (TP=2.0, SL=5.0) | +8,158 | +13,178 |
+| Trades | 74 | 42 |
+| Correlacao Spearman (grid 7x7) | **+0.741** | p<0.0001 |
+| Correlacao Spearman (grid 10x7) | **+0.431** | p=0.0002 |
+| Overlap Top 10 | 4/10 (40%) | — |
+
+**Conclusao:** F1 Novo tem correlacao POSITIVA com F2 (vs -0.772 da versao antiga com samples).
+Nao eh identico (F1 gera mais trades), mas serve como pre-filtro confiavel para 500K combos.
+
+---
+
 ## Ultima Atualizacao: 2026-05-04 (Pipeline E2E Completo — PA_SIGNAL_DIR BUY)
 
 ### Pipeline E2E V8.7 Executado com Sucesso

@@ -1,234 +1,146 @@
-# Motores de Backtest WIN
+# Engines — Documentacao da Pasta
 
-## Visão Geral
+**Versao:** V7.6.0
+**Atualizado:** 2026-05-05
 
-| Motor | Nome | Dados | Velocidade | Guardrails | Uso |
-|-------|------|-------|-----------|------------|-----|
-| **F1** | Fast Screener | last ticks (15 amostras/candle) | ~1.000/s | **NENHUM** (apenas SL/TP fixo + blocking) | Pre-filtro |
-| **F1b** | Fast Screener Binario | last ticks (15 amostras/candle) | ~1.000/s | **NENHUM** (SL/TP + blocking bitwise) | Pre-filtro (blocking correto) |
-| **F2** | TICK_LAST | last ticks (todos) | 2/s | Completos | Validacao IS |
-| **F3** | TICK_BA | bid/ask real | 2/s | Completos | **Referencia Ouro** |
+**Documentacao relacionada:**
+- [`docs/GUIA_DE_CICLOS.md`](../docs/GUIA_DE_CICLOS.md) — Pipeline completo F0-F8
+- [`data/README_DADOS.md`](../data/README_DADOS.md) — Dados, periodos e colunas
+- [`docs/README_ENGINES.md`](../docs/README_ENGINES.md) — Arquitetura detalhada BacktestEngine v2
+- [`AGENTS.md`](../AGENTS.md) — Regras operacionais e checklist
 
-## REGRA FUNDAMENTAL: F1 NAO TEM GUARDRAILS
+---
 
-F1 **NAO** implementa **NENHUM** guardrail:
-- ❌ Break Even (BE)
-- ❌ Grace Period
-- ❌ Circuit Breaker
-- ❌ Slope Decay
-- ❌ Filtro de hora (hour filter)
-- ❌ Filtro de dia da semana
-- ❌ Cooldown apos SL
-- ❌ S/R buffers
-- ❌ TP30 (take-profit adaptativo)
-- ✅ **APENAS** SL/TP fixo (calculado como tp*ATR, sl*ATR)
-- ✅ **APENAS** Position blocking (skip = sell_idx + 1)
+## Arquivos Ativos
 
-### Consequencias:
-- F1 usa **last prices sampleados** (15/candle) → diferenca de ~5 pts no PnL vs bid/ask
-- F1 tem **custo simulado de 30 pts/trade** (nao calculado do spread real)
-- F1 **nao filtra hora/dia/ATR** — filtros devem ser aplicados EXTERNAMENTE (filtrar o DataFrame/parquet antes)
-- F1 pode entrar em trades em qualquer horario (precisa de pre-filtro por hora)
-- F1 pode gerar ate 5-10x mais trades que F3 pela ausencia de guardrails
-- F1 e a **pura simulacao de entrada/saida** sem qualquer gestao de risco
+| Arquivo | Descricao | Status |
+|---------|-----------|--------|
+| `f1_binario_v4_hybrid.py` | F1 Hybrid V5 (vectorize + thread pool persistente) | **RECOMENDADO** |
+| `f1_binario.py` | F1 baseline (OHLC, loop numba, single-core) | ATIVO (baseline/comparacao) |
+| `f1_fast_screener.py` | F1 original (com tick samples, 15/candle) | **LEGADO** — nao usar para novo desenvolvimento |
+| `f2_tick_last.py` | F2 com tick last | ATIVO |
+| `f3_tick_ba.py` | F3 com bid/ask real | ATIVO |
+| `calibrate_regime.py` | Calibracao de regime (ER/ADX) | ATIVO |
+| `check_dist.py` | Utilitario de distribuicao | ATIVO |
 
-### Quando usar o F1:
-- **UNICAMENTE** como pre-filtro para eliminar configs obviamente ruins
-- **NUNCA** confiar no PnL absoluto do F1 (sempre superestima)
-- Usar correlacao de rankeamento (~0.5-0.6), nao valor exato
+## Arquivos Arquivados
 
-## F1 — Fast Screener (`f1_fast_screener.py`)
+Versoes antigas movidas para `engines/arquivados/`:
 
-Pre-processa ticks UMA vez, cria matriz M (entries x 750 amostras = 50 candles x 15 samples).
+| Arquivo | Motivo |
+|---------|--------|
+| `f1_binario_v2.py` | Superado pelo v3/v4 |
+| `f1_binario_v3.py` | Superado pelo v4 |
+| `f1_binario_v4.py` | Superado pelo v4b/hybrid |
+| `f1_binario_v4b.py` | Superado pelo hybrid |
+| `f1_ohlc.py` | Integrado no f1_binario.py |
+| `f1_binario_deprecated.py` | Backup da versao com tick samples |
+| `f2_optimization_v87.py` | Versao antiga do F2 |
 
-**Pipeline:**
-1. `build_M_close()`: processa ticks → candle samples (15/candle) → matriz M
-2. `evaluate()`: para cada (tp, sl) → broadcast numpy → hit SL/TP nos samples → position blocking (pos-processamento)
+---
 
-**Arquitetura:**
+## Como Escolher o Motor F1
+
+```
+Grid pequeno (< 1K combos)  -> f1_binario.py (simples, confiavel, sem thread pool)
+Grid medio (< 20K combos)   -> f1_binario_v4_hybrid.py (1T ou 4T, blocking='exact')
+Grid grande (> 20K combos)  -> f1_binario_v4_hybrid.py (8T, pool persistente, blocking='exact')
+Top-N apenas (sem matriz)   -> engine.evaluate_batch_topn(blocking_mode='exact')
+```
+
+**IMPORTANTE:** Use sempre `blocking_mode='exact'`. O modo 'single' gera 2-28x mais trades que F2/F3 e distorce o rankeamento. Ver [`docs/GUIA_DE_CICLOS.md`](../docs/GUIA_DE_CICLOS.md) — FASE 1.
+
+---
+
+## Interface Comum
+
+Todos os motores F1 compartilham a mesma interface stateless para compatibilidade:
+
 ```python
-M[i, :] = [tick1, tick2, ..., tick750]  # 750 sampled prices pos-entrada (50 candles x 15 samples)
+# Stateless (1 combo)
+net, n_trades = evaluate(high, low, close, ep, atr, sell_idx, tp, sl, direction=-1)
+
+# Stateless (grid completo, single-core)
+net_grid, n_grid = evaluate_batch(high, low, close, ep, atr, sell_idx, tp_grid, sl_grid, direction=-1)
+
+# Stateful (pool persistente — RECOMENDADO para uso repetido)
+engine = F1HybridEngine(high, low, close, ep, atr, sell_idx, direction=-1, n_threads=8)
+net_grid, n_grid = engine.evaluate_batch(tp_grid, sl_grid, blocking_mode='exact')
+engine.shutdown()
 ```
 
-**SL/TP:** Fixo baseado em multiplicadores do ATR (tp_pts = tp * atr, sl_pts = sl * atr).
+**Dados de entrada:**
+- `high`, `low`, `close`: arrays 1D do `super_win_continuous.parquet` (ver [`data/README_DADOS.md`](../data/README_DADOS.md) secao 1.1)
+- `ep`, `atr`, `sell_idx`: arrays das entradas filtradas
+- NAO e necessario carregar ticks para F1 — usa apenas OHLC
 
-**Blocking:** `skip = sell_idx + 1` (1 candle, SEM cooldown adicional).
+---
 
-## F1b — Fast Screener Binario (`f1_binario.py`)
+## Dependencias
 
-Variante do F1 com blocking bitwise via vetores binarios (0/1).
+- `numpy`
+- `numba` (para funcoes `@njit`)
+- `concurrent.futures` (apenas para Hybrid com threads > 1)
 
-**Vantagens:**
-- Blocking MAIS CORRETO que o F1 Original
-- Suporta duracao real do trade (N candles), nao apenas 1 candle fixo
-- Bit-packing em uint64: 64 candles por inteiro, colisao verificada via AND
+---
 
-**Dois modos de blocking:**
-- `'single'`: bloqueia apenas 1 candle (sell_idx+1) — **compativel com F2/F3**
-- `'exact'`: bloqueia a duracao real do trade ([sell_idx+1, sell_idx+duration])
+## Pipeline F1 -> F2 -> F3
 
-**Descoberta:** O F1 Original tem blocking impreciso que bloqueia trades desnecessariamente. O F1b single gera ~77% mais trades que o F1 Original (blocking correto).
+```
+F1 (Pre-Filtro)        F2 (Validacao IS)        F3 OOS (Juiz Final)
+    |                       |                           |
+    v                       v                           v
+ OHLC, exact          Tick-level (last)          Tick-level (bid/ask real)
+ ~55K combos/s         Guardrails basicos          Guardrails completos
+ Top 30 configs        Top 10 configs              Top 3 configs
+ Sem custo real        Custo 30 pts simulado       Custo do spread real
+```
 
-**Arquitetura:**
+**Detalhamento:**
+
+| Motor | Dados de Entrada | Guardrails | Ticks | Correlacao com anterior |
+|-------|------------------|------------|-------|-------------------------|
+| F1-Exact | `super_win_continuous.parquet` (OHLC) | NENHUM | Nao usa | — |
+| F2 | `WIN_merged_all.parquet` (last prices) | BE, HP, TP30, Grace, Slope Decay, CD | `last` (sintetico) | +0.998 vs F1-Exact |
+| F3 OOS | `data/ticks/WIN*.parquet` (bid/ask) | Guardrails completos | bid/ask REAIS | +0.987 vs F2 (sem GR) |
+
+**Regras de Ouro:**
+1. F1-Exact e F2 sao identicos (correlacao +0.998) — F1 serve como pre-filtro rapido
+2. F3 sem GR se alinha com F2 (correlacao +0.987) — validacao de saida
+3. F3 com GR eh diferente por design — nao comparar PnL absoluto com F2
+4. NUNCA usar F1-Single para rankeamento (2-28x mais trades, distorce tudo)
+
+---
+
+## Qualidade dos Dados de Tick
+
+**Problemas encontrados nos ticks da plataforma (OOS):**
+- **0.001%** com preco = 0.0 (causa SL falso com pnl = -ep)
+- **0.001%** com valores absurdos (bid = 214,585 quando preco ~195,000)
+- **~12%** das candles sem tick do high/low real (amostragem incompleta)
+
+**Solucao:** Filtro INLINE no `_simulate_exit_v119` (`backtest/engine_v119_v2.py`):
 ```python
-1. evaluate_combo(): numpy broadcast → had, pnl, duration
-2. blocking_binario_uint64(): numba → bit-packing, AND/OR
-3. evaluate_batch(): loop sobre grid TP×SL
+# Ignora ticks fora do range da candle +/- 1000 pts
+if bt <= 0 or bt < float(cj["low"]) - 1000 or bt > float(cj["high"]) + 1000:
+    continue
+
+# Fallback para high/low da candle quando nenhum tick valido cruza
+if float(cj["high"]) >= ep + current_tp:
+    pnl = round(float(cj["high"]) - ep)
 ```
 
-**Interface:**
-```python
-evaluate(M, ep, atr, sell_idx, tp, sl, direction=-1, blocking_mode='single')
-```
+**NAO pre-processar ticks externos** — quebra `_build_tick_index`. Use filtro inline.
 
-## F2 — TICK_LAST (`f2_tick_last.py`)
+Para mais detalhes sobre os ticks, ver [`data/README_DADOS.md`](../data/README_DADOS.md) secoes 1.2 e 1.3.
 
-Wrapper do engine_v2 usando ticks com last prices (bid=ask=last).
+---
 
-Usado para validar no periodo IS (Jan-Mar), onde so ha last ticks.
+## Changelog
 
-**Correlacao com F3:** 0.988 (spread de 5 pts do WIN e irrelevante).
-
-## F3 — TICK_BA (`f3_tick_ba.py`)
-
-Wrapper do engine_v2 usando ticks reais com bid/ask.
-
-**Referencia Ouro** para validacao final. TEM todos os guardrails.
-
-## DOIS MODOS DE USO DO F3 (e comparacao com F1)
-
-### Modo Busca (`com_guardrails=False`)
-Usado para **comparar F1 com F3** e selecionar estrategias. F3 opera IGUAL ao F1:
-- Desliga BE (be_trigger=999999)
-- Desliga Grace Period (grace_candles=999)
-- Desliga Cooldown (cooldown_candles=0)
-- Desliga Circuit Breaker
-- Desliga Slope Decay
-- Desliga lunch filter (12-14h)
-- Desliga restricao 9:00-9:30
-- Desliga TP30 (half-profit adaptativo)
-- **Apenas SL/TP fixo + position blocking (igual ao F1)**
-
-**Neste modo, F2 e F3 batem com correlacao >0.99** (diferenca so do spread bid/ask).
-
-### Modo Producao (`com_guardrails=True`)
-Usado para **validacao final** dos parametros otimizados no OOS:
-- BE ativo (be_trigger=200)
-- Grace Period ativo (grace_candles=2)
-- Cooldown ativo (cooldown_candles=2)
-- Circuit Breaker ativo (max 5 SLs consecutivos)
-- Slope Decay ativo (0.50)
-- Lunch filter e restricao 9:00-9:30 ativos
-- TP30 ativo (hp_candles=2, hp_th=0.15)
-
-## Fixes Recentes
-
-### 1. Engine V2 — Exit tick-a-tick (engine_v119_v2.py)
-**Antes:** `if max(ask_bar) >= sl: pnl = ep - max(ask_bar)`  
-Usava o **maximo/minimo da candle inteira** para calcular o PnL de saida. Superestimava perdas em SL e ganhos em TP.
-
-**Depois:** Itera tick por tick dentro da candle, sai no **primeiro** que cruza SL ou TP:
-```python
-for t in range(s_tick, e_tick):
-    if ask_arr[t] >= effective_sl:
-        pnl = ep - ask_arr[t]; break
-```
-
-**Impacto:** F2 vs F3 passaram de diferenca de ~5-10% para <1%.
-
-### 2. F1 — PnL real do sample (f1_fast_screener.py)
-**Antes:** `pnl[SL] = -sl_pts` (distancia fixa do SL)  
-**Depois:** `pnl = ep - cross_price` (preco real do sample que cruzou)
-
-**Impacto:** PnL agora reflete o preco real de saida. A unica diferenca vs F2/F3 e a amostragem (15 vs todos ticks).
-
-### 3. Modo Busca (engine_v2.py)
-Adicionado `modo_busca=True` ao `BacktestConfig`. Desliga:
-- Circuit Breaker (5 SLs consecutivos)
-- Lunch filter (12-14h, DIST_ABS<300)
-- Restricao 9:00-9:30 (so HUNTER)
-
-### 4. F3: `apenas_sell` (f3_tick_ba.py)
-- `apenas_sell=True`: filtra `PA_SIGNAL_DIR = -1` (so SELL, igual F1)
-- `apenas_sell=False`: `PA_SIGNAL_DIR != 0` (ambos sentidos)
-
-## Estudo de Amostragem F1 (30 Abr 2026)
-
-Testamos 7 técnicas de amostragem para o F1 no OOS (TP=10.0 SL=0.2, PA_SIGNAL_DIR SELL):
-
-| Técnica | PnL | Erro vs F3 | Build | Descricao |
-|---------|-----|-----------|-------|-----------|
-| **F3 (bid/ask)** | **+46.740** | **ref** | — | tick-a-tick (padrao ouro) |
-| F2 (last-only) | +46.465 | -0,6% | — | tick-a-tick, sem spread |
-| **F1_60** | **+59.085** | **+26%** | **15ms** | 60 amostras uniformes |
-| **F1_15** | **+62.460** | **+34%** | **18ms** | 15 amostras uniformes |
-| F1_60m micro-OHLC | +72.825 | +56% | 1,8s | high+low por bucket |
-| F1_60l LTTB | +74.765 | +60% | 18s | downsampling forma |
-| F1_60p P10/P50/P90 | +76.310 | +63% | 4,3s | percentis 10/50/90 |
-| F1_60s smooth | +19M | invalido | 3min | media movel |
-
-### Conclusoes:
-1. **Nenhuma tecnica de amostragem substitui tick-by-tick.** A perda de informacao entre amostras e inevitavel.
-2. **F1_15 e o melhor custo-beneficio:** 18ms build, 3ms para 70 configs, 34% de erro (aceitavel para pre-filtro).
-3. **F1_60 melhora apenas 8%:** 4x mais dados reduziu o erro de +34% para +26%. Ganho marginal decrescente.
-4. **Micro-OHLC, LTTB, P60 PIORAM o erro:** Tecnicas que preservam extremos introduzem vies de superestimacao.
-5. **Suavizacao e invalida:** Media movel achata os picos, nunca atinge SL/TP.
-6. **F2 e quase identico ao F3** (correlacao 0.9934, diferenca <1%). A unica diferenca e o spread bid/ask.
-
-### Fluxo recomendado:
-```
-1. F1_15 no periodo de treino → 200K configs/s → elimina 80% piores
-2. F3 modo BUSCA (sem guardrails) → valida top 10-20
-3. F3 modo PRODUCAO (com guardrails) → report final top 3-5
-```
-
-F1_15 NAO substitui F3 para validacao final. Use apenas como pre-filtro de velocidade.
-
-### Fluxo Correto
-```
-1. F1 no periodo de treino → 200K configs/s → elimina 80% piores
-2. F3 modo BUSCA no mesmo periodo → valida top 10-20 (compara com F1)
-3. F3 modo PRODUCAO no OOS → report final top 3-5
-```
-
-Guardrails (hour filter, BE, Grace, etc.) sao aplicados APENAS no F3 modo PRODUCAO.
-F1 e F3 modo BUSCA OPERAM SEM GUARDRAILS.
-
-## Arquivos
-
-| Arquivo | Descricao |
-|---------|-----------|
-| `f1_fast_screener.py` | Motor F1 (sem guardrails) |
-| `f2_tick_last.py` | Wrapper F2 (= F3 com last ticks) |
-| `f3_tick_ba.py` | Wrapper F3 (referencia) |
-| `README.md` | Este arquivo |
-
-## Estrategias Implementadas
-
-| Versao | Estrategia | Arquivo | Status | Documentacao |
-|--------|------------|---------|--------|--------------|
-| **V8.4** | Hybrid com bug fix | `backtest/strategies/v84.py` | ✅ | `docs/WIN_docs/V84_VALIDACAO.md` |
-| **V8.5** | Grid search 144 combos | `backtest/strategies/v85.py` | ✅ | `docs/WIN_docs/` |
-| **V8.6** | RANGE gmin=200, H-Progress=2c, BE=50 | `backtest/strategies/v86.py` | ✅ | `docs/WIN_docs/V86_HYBRID_DOCUMENTACAO.md` |
-| **V8.7** | Grid otimizado (7.26M combos) | `backtest/strategies/v87.py` | ⏳ | `docs/WIN_docs/GRID_SEARCH_OTIMIZADO_V87.md` |
-
-### Scripts F1/F2/F3 por Versao
-
-| Versao | F1 Script | F2 Script | F3 Script | Local |
-|--------|-----------|-----------|-----------|-------|
-| **V8.4** | `f1_full_scan_v84.py` | — | — | `scripts/` |
-| **V8.5** | `f1_full_scan_v85.py` | — | — | `scripts/` |
-| **V8.6** | `f1_full_scan_v86.py` | — | — | `scripts/` (mover para `engines/`) |
-| **V8.7** | ⏳ `f1_full_scan_v87.py` | ⏳ | ⏳ | ⏳ (criar em `engines/`) |
-
-## Motor Interno: engine_v2 (backtest/engine_v2.py)
-
-O `BacktestEngine` em `backtest/engine_v2.py` é o motor real usado por F2 e F3. A partir da V6.3, suporta:
-
-- **Layer 2 — Ensemble Voting**: `mode.weight` + `ensemble_threshold` para votação ponderada entre múltiplos modos
-- **Layer 4 — Risk Manager**: `risk_manager.daily_stop`, `consecutive_sl_limit`, `consecutive_sl_cooldown`
-- **Layer 3 — day_of_week filter**: Já funcionava, agora documentado
-
-Detalhes em `docs/WIN_docs/ARQUITETURA_BOT.md`.
-
-> ⚠️ Backup da versão original salvo em `backtest/engine_v2_BACKUP_ORIGINAL.py`.
+- **2026-05-05 (V7.6.0):** Documentacao revisada. Referencias cruzadas adicionadas. F1 fast screener marcado como LEGADO.
+- **2026-05-05:** F3 — Filtro inline de ticks invalidos + fallback high/low
+- **2026-05-05:** F1 Hybrid V5 adicionado (~55K combos/s single, ~39K combos/s exact)
+- **2026-05-05:** Versoes antigas arquivadas em `engines/arquivados/`
+- **2026-05-05:** F1 refatorado para OHLC (sem tick samples)
+- **2026-05-05:** F3 corrigido (TP usa tick real bid/ask)

@@ -1,18 +1,32 @@
 """
-F1 Binario — Fast Screener com Blocking Bitwise
-================================================
+F1 Binario — Fast Screener com Blocking Bitwise (OHLC-Based)
+=============================================================
+VERSAO NOVA (2026-05-05): Usa APENAS high/low das candles.
+NAO usa tick samples. NAO precisa de WIN_merged_all.parquet.
+
 Cada trade e um vetor binario (0/1) de candles ocupadas.
 Blocking via operacoes bitwise (AND/OR) — extremamente rapido.
 
+Dados usados:
+  - high, low, close, atr: arrays 1D do super_win_continuous.parquet
+  - sell_idx: indices das candles de entrada
+  - direction: -1 = SELL, 1 = BUY
+
+Logica de entrada/saida IDENTICA ao F2:
+  BUY:  TP se high >= tp_price, SL se low <= sl_price
+  SELL: TP se low <= tp_price, SL se high >= sl_price
+  PnL = threshold fixo (tp_pts ou -sl_pts)
+
 Vantagens:
-- Blocking em O(1) por trade via operacoes bitwise (uint64)
-- Duração real do trade (N candles) OU 1 candle fixo (compatível F1/F2/F3)
-- Facil escalonamento para milhoes de combos
+  - Mesma fonte de dados do F2 (candles OHLC)
+  - PnL no threshold (nao no tick sampleado) → correlacao positiva com F2
+  - Sem dependencia de tick samples para IS
+  - Blocking em O(1) por trade via operacoes bitwise (uint64)
 
 Arquitetura:
 -----------
-1. evaluate_combo(): vetorizado numpy — calcula SL/TP hit, PnL, duração em candles
-2. blocking_binario_uint64(): numba sequencial — bit-packing uint64, AND/OR
+1. evaluate_combo(): numba — loop sobre entradas, verifica high/low futuros
+2. blocking_binario_uint64(): numba — bit-packing uint64, AND/OR
 3. evaluate_batch(): loop sobre grid de TP/SL, reusa evaluate_combo()
 
 Modos de Blocking:
@@ -27,7 +41,7 @@ Para 108 candles (dia WIN M5): apenas 2 uint64 por trade.
 Colisao = (master & trade_mask) != 0 → resolvido em 2 operacoes CPU.
 
 Interface compativel com f1_fast_screener.evaluate():
-    evaluate(M, ep, atr, sell_idx, tp, sl, direction=-1, blocking_mode='single')
+    evaluate(high, low, close, ep, atr, sell_idx, tp, sl, direction=-1, blocking_mode='single')
 """
 import numpy as np
 
@@ -41,20 +55,19 @@ except ImportError:
             return func
         return decorator
 
-SAMP = 15
-MAX_C = 50
-N_SAMPLES = MAX_C * SAMP
-COST = 30
+MAX_C = 50    # Maximo de candles futuras (igual F2)
+COST = 30     # Custo fixo simulado
 
 
-def evaluate_combo(M, ep, atr, sell_idx, tp, sl, direction=-1):
+@njit(fastmath=True)
+def _evaluate_combo_numba(high, low, close, ep, atr, sell_idx, tp, sl, direction):
     """
-    Avalia UMA config (tp, sl) via broadcast numpy.
-    Retorna had, pnl, duration (em candles).
+    Avalia UMA config (tp, sl) via loop numba sobre entradas.
+    Usa high/low para DETECTAR cruzamento e close (tick last) para PnL.
 
     Args:
-        M: (n_entries, N_SAMPLES) — sampled last ticks
-        ep: (n_entries,) — precos de entrada
+        high, low, close: (N_candles,) — arrays de cada candle
+        ep: (n_entries,) — precos de entrada (close da candle de sinal)
         atr: (n_entries,) — ATR na entrada
         sell_idx: (n_entries,) — indices das candles de entrada
         tp, sl: multiplicadores
@@ -62,41 +75,48 @@ def evaluate_combo(M, ep, atr, sell_idx, tp, sl, direction=-1):
 
     Returns:
         had: (n_entries,) bool — teve exit?
-        pnl: (n_entries,) float32 — PnL bruto
+        pnl: (n_entries,) float32 — PnL bruto (close[c] - entry)
         duration: (n_entries,) int32 — duracao em candles (1..MAX_C)
     """
     n = len(ep)
-
-    tp_pts = tp * atr
-    sl_pts = sl * atr
-
-    if direction == -1:  # SELL
-        sl_th = ep + sl_pts
-        tp_th = ep - tp_pts
-        sl_hit = M >= sl_th[:, None]
-        tp_hit = M <= tp_th[:, None]
-    else:  # BUY
-        sl_th = ep - sl_pts
-        tp_th = ep + tp_pts
-        sl_hit = M <= sl_th[:, None]
-        tp_hit = M >= tp_th[:, None]
-
-    hit = sl_hit | tp_hit
-    fi = np.argmax(hit, axis=1)
-    rows = np.arange(n)
-    had = hit.any(axis=1)
-
-    # PnL: preco real do sample que cruzou
+    had = np.zeros(n, dtype=np.bool_)
     pnl = np.zeros(n, dtype=np.float32)
-    cross_price = M[rows, fi]
-    if direction == -1:
-        pnl[had] = ep[had] - cross_price[had]
-    else:
-        pnl[had] = cross_price[had] - ep[had]
-
-    # Duracao em candles: fi // SAMP + 1, limitado a MAX_C
     duration = np.zeros(n, dtype=np.int32)
-    duration[had] = np.minimum(fi[had] // SAMP + 1, MAX_C)
+
+    for i in range(n):
+        entry_price = ep[i]
+        atr_i = atr[i]
+        tp_price = entry_price + tp * atr_i if direction == 1 else entry_price - tp * atr_i
+        sl_price = entry_price - sl * atr_i if direction == 1 else entry_price + sl * atr_i
+
+        start_candle = sell_idx[i] + 1
+        end_candle = min(start_candle + MAX_C, len(high))
+
+        for c in range(start_candle, end_candle):
+            exit_price = close[c]  # tick last da candle de saida
+
+            if direction == 1:  # BUY
+                if high[c] >= tp_price:
+                    had[i] = True
+                    pnl[i] = exit_price - entry_price
+                    duration[i] = c - start_candle + 1
+                    break
+                if low[c] <= sl_price:
+                    had[i] = True
+                    pnl[i] = exit_price - entry_price
+                    duration[i] = c - start_candle + 1
+                    break
+            else:  # SELL
+                if low[c] <= tp_price:
+                    had[i] = True
+                    pnl[i] = entry_price - exit_price
+                    duration[i] = c - start_candle + 1
+                    break
+                if high[c] >= sl_price:
+                    had[i] = True
+                    pnl[i] = entry_price - exit_price
+                    duration[i] = c - start_candle + 1
+                    break
 
     return had, pnl, duration
 
@@ -212,24 +232,27 @@ def blocking_binario_uint8(sell_idx, had, pnl, duration, N_candles, blocking_mod
     return int(total_pnl) - total_trades * COST, total_trades
 
 
-def evaluate(M, ep, atr, sell_idx, tp, sl, direction=-1, use_uint64=True, blocking_mode='single'):
+def evaluate(high, low, close, ep, atr, sell_idx, tp, sl, direction=-1, use_uint64=True, blocking_mode='exact'):
     """
     Interface compativel com f1_fast_screener.evaluate().
 
     Args:
-        M, ep, atr, sell_idx: arrays do F1
+        high, low, close: (N_candles,) — arrays de candles (close = tick last)
+        ep: (n_entries,) — precos de entrada
+        atr: (n_entries,) — ATR na entrada
+        sell_idx: (n_entries,) — indices das candles de entrada
         tp, sl: multiplicadores
         direction: -1 = SELL, 1 = BUY
         use_uint64: True = bit-packing uint64, False = uint8 simples
-        blocking_mode: 'single' = 1 candle (compativel F1 Original/F2/F3),
-                       'exact' = duracao real
+        blocking_mode: 'exact' = duracao real (padrao, alinhado com F2/F3),
+                       'single' = 1 candle (compativel F1 Original legacy)
 
     Returns:
         net: PnL liquido
         n_trades: numero de trades
     """
-    had, pnl, duration = evaluate_combo(M, ep, atr, sell_idx, tp, sl, direction)
-    N_candles = int(sell_idx.max()) + MAX_C + 2
+    had, pnl, duration = _evaluate_combo_numba(high, low, close, ep, atr, sell_idx, tp, sl, direction)
+    N_candles = len(high)
     mode_int = 0 if blocking_mode == 'exact' else 1
 
     if use_uint64:
@@ -238,18 +261,18 @@ def evaluate(M, ep, atr, sell_idx, tp, sl, direction=-1, use_uint64=True, blocki
         return blocking_binario_uint8(sell_idx, had, pnl, duration, N_candles, mode_int)
 
 
-def evaluate_batch(M, ep, atr, sell_idx, tp_grid, sl_grid, direction=-1, use_uint64=True, blocking_mode='single'):
+def evaluate_batch(high, low, close, ep, atr, sell_idx, tp_grid, sl_grid, direction=-1, use_uint64=True, blocking_mode='exact'):
     """
     Avalia multiplos combos (tp x sl) simultaneamente.
 
     Args:
-        M: (n_entries, N_SAMPLES)
+        high, low, close: (N_candles,) — arrays de candles
         ep, atr, sell_idx: (n_entries,)
         tp_grid: array de TPs (ex: np.array([1.0, 1.5, 2.0]))
         sl_grid: array de SLs
         direction: -1 ou 1
         use_uint64: True = bit-packing uint64
-        blocking_mode: 'single' ou 'exact'
+        blocking_mode: 'exact' (padrao, alinhado F2) ou 'single' (legacy)
 
     Returns:
         net_grid: (n_tp, n_sl) — PnL liquido por combo
@@ -261,12 +284,12 @@ def evaluate_batch(M, ep, atr, sell_idx, tp_grid, sl_grid, direction=-1, use_uin
     net_grid = np.zeros((n_tp, n_sl), dtype=np.int32)
     n_grid = np.zeros((n_tp, n_sl), dtype=np.int32)
 
-    N_candles = int(sell_idx.max()) + MAX_C + 2
+    N_candles = len(high)
     mode_int = 0 if blocking_mode == 'exact' else 1
 
     for i, tp in enumerate(tp_grid):
         for j, sl in enumerate(sl_grid):
-            had, pnl, duration = evaluate_combo(M, ep, atr, sell_idx, tp, sl, direction)
+            had, pnl, duration = _evaluate_combo_numba(high, low, close, ep, atr, sell_idx, tp, sl, direction)
             if use_uint64:
                 net, n_trades = blocking_binario_uint64(sell_idx, had, pnl, duration, N_candles, mode_int)
             else:

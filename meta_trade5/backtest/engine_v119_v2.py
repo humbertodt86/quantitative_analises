@@ -105,9 +105,9 @@ def _simulate_exit_ohlc(records, i, N, signal, ep, tp_pts, sl_pts,
                 pnl = int(be_sl_price - ep)
                 hit_type = "BE"
                 break
-            # Check TP
+            # Check TP (CORRECAO 2026-05-05: usa high real, nao threshold fixo)
             if float(cj["high"]) >= ep + tp_pts:
-                pnl = tp_pts
+                pnl = int(float(cj["high"]) - ep)
                 hit_type = "TP"
                 break
         else:  # SELL
@@ -121,9 +121,9 @@ def _simulate_exit_ohlc(records, i, N, signal, ep, tp_pts, sl_pts,
                 pnl = int(ep - be_sl_price)
                 hit_type = "BE"
                 break
-            # Check TP
+            # Check TP (CORRECAO 2026-05-05: usa low real, nao threshold fixo)
             if float(cj["low"]) <= ep - tp_pts:
-                pnl = tp_pts
+                pnl = int(ep - float(cj["low"]))
                 hit_type = "TP"
                 break
 
@@ -281,12 +281,24 @@ def _simulate_exit_v119(records, bid_arr, ask_arr, tick_idx, i, N,
                 if trailing_sl_price is not None:
                     effective_sl = max(effective_sl, trailing_sl_price)
                 # Tick-by-tick: primeiro tick que cruza TP ou SL
+                # CORRECAO 2026-05-05: TP agora usa preco real do tick (bt - ep),
+                # nao threshold fixo (current_tp). O tick pode cruzar ACIMA do TP,
+                # capturando slippage favoravel. SL ja usava tick real (bt - ep).
                 for t in range(s_tick, e_tick):
                     bt = bid_arr[t]
+                    # FILTRO 2026-05-05: ignora ticks invalidos (<=0 ou fora do range da candle)
+                    if bt <= 0 or bt < float(cj["low"]) - 1000 or bt > float(cj["high"]) + 1000:
+                        continue
                     if bt >= ep + current_tp:
-                        pnl = current_tp; hit_type="TP"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
+                        pnl = round(bt - ep); hit_type="TP"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
                     if bt <= effective_sl:
                         pnl = max(round(bt - ep), -hard_stop); hit_type="SL"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
+                # FALLBACK 2026-05-05: se nenhum tick valido capturou o cruzamento,
+                # usar high/low da candle como ground truth (~12% das candles).
+                if float(cj["high"]) >= ep + current_tp:
+                    pnl = round(float(cj["high"]) - ep); hit_type="TP"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
+                if float(cj["low"]) <= effective_sl:
+                    pnl = max(round(float(cj["low"]) - ep), -hard_stop); hit_type="SL"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
             else:
                 hard_stop_price=ep+hard_stop
                 if be_active and be_sl_price is not None:
@@ -299,12 +311,23 @@ def _simulate_exit_v119(records, bid_arr, ask_arr, tick_idx, i, N,
                 if trailing_sl_price is not None:
                     effective_sl = min(effective_sl, trailing_sl_price)
                 # Tick-by-tick: primeiro tick que cruza TP ou SL
+                # CORRECAO 2026-05-05: TP agora usa preco real do tick (ep - at),
+                # nao threshold fixo (current_tp). SL ja usava tick real (ep - at).
                 for t in range(s_tick, e_tick):
                     at = ask_arr[t]
+                    # FILTRO 2026-05-05: ignora ticks invalidos (<=0 ou fora do range da candle)
+                    if at <= 0 or at < float(cj["low"]) - 1000 or at > float(cj["high"]) + 1000:
+                        continue
                     if at <= ep - current_tp:
-                        pnl = current_tp; hit_type="TP"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
+                        pnl = round(ep - at); hit_type="TP"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
                     if at >= effective_sl:
                         pnl = max(round(ep - at), -hard_stop); hit_type="SL"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
+                # FALLBACK 2026-05-05: se nenhum tick valido capturou o cruzamento,
+                # usar high/low da candle como ground truth.
+                if float(cj["low"]) <= ep - current_tp:
+                    pnl = round(ep - float(cj["low"])); hit_type="TP"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
+                if float(cj["high"]) >= effective_sl:
+                    pnl = max(round(ep - float(cj["high"])), -hard_stop); hit_type="SL"; return pnl, hit_type, mfe, mae, j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
 
     return pnl, hit_type, mfe, mae, exit_j, candles_in_trade, be_triggered_flag, tp30_triggered_flag, slope_decay_triggered_flag, progressed_flag, trailing_triggered_flag
 

@@ -28,10 +28,12 @@ Antes de rodar qualquer codigo de simulacao, voce deve escrever este arquivo det
 
 | Arquivo | Descricao |
 |---------|-----------|
-| `data/super_win_continuous.parquet` | Indicadores master (154 colunas, ~101k linhas) |
-| `data/WIN_merged_all.parquet` | Ticks IS (last prices para F1/F2) |
-| `data/ticks/WIN*.parquet` | Ticks OOS (bid/ask real — O Juiz Final) |
-| `data/_fev_cache_v2.npz` | Cache Fev pre-computado para F1 screening |
+| `data/win_deploy/super_win_IS.parquet` | Candles + indicadores + sinais (Jan-Mar 2026) |
+| `data/win_deploy/super_win_OOS.parquet` | Candles + indicadores + sinais (Abr 2026) |
+| `data/win_deploy/WIN_merged_all.parquet` | Ticks IS (last prices para F1/F2) |
+| `data/win_deploy/WIN_ticks_OOS_all.parquet` | Ticks OOS unificados (bid/ask real — O Juiz Final) |
+| `data/win_deploy/_fev_cache_v2.npz` | Cache Fev pre-computado para F1 screening |
+| `data/super_win_continuous.parquet` | Indicadores master legado (IS+OOS+Fev unificado) — ainda suportado |
 
 ### Colunas Principais (WIN)
 
@@ -78,7 +80,7 @@ Filtros (ex: `PA_REV_RSI != 0`) apenas selecionam o candle. A direcao vem do sin
 
 O F1 usa `engines/f1_fast_screener.py` (avaliação vetorizada, ~200K combos/segundo).
 
-**Carregamento de Dados:** Feito uma unica vez no `load_data_once()` via cache Fev (`_fev_cache_v2.npz`).
+**Carregamento de Dados:** Feito uma unica vez no `load_data_once()`. Usa `super_win_IS.parquet` + `super_win_OOS.parquet` (modo split) ou `super_win_continuous.parquet` (modo legado unificado).
 
 ### C. Modelo de Custo (WIN)
 
@@ -134,7 +136,7 @@ FASE 8: Ensemble (se 2+ sinais validados)
 ## 5. Checklist de Verificacao (Anti-Erro)
 
 - [ ] Criou/Atualizou o cycle_plan.md antes de rodar?
-- [ ] Esta usando a `super_win_continuous.parquet`?
+- [ ] Os arquivos de dados estao em `data/` (copiados de `data/win_deploy/`)?
 - [ ] O custo de 30 pts esta incluido no calculo do PnL Liquido?
 - [ ] O relatorio segmenta por hora e dia da semana (Sempre OOS)?
 - [ ] O Win Rate OOS e superior a 35% com trades > 10?

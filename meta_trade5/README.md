@@ -42,10 +42,13 @@ meta_trade5/
 │   ├── engine_v2.py                 # BacktestEngine IS (last prices)
 │   └── engine_v119_v2.py            # BacktestEngine OOS (bid/ask real)
 ├── data/
-│   ├── super_win_continuous.parquet # Candles OHLC + 154 indicadores
-│   ├── WIN_merged_all.parquet       # Ticks IS (last prices)
-│   ├── _fev_cache_v2.npz           # Cache Fev pre-computado (legado)
-│   └── ticks/                       # Ticks OOS diarios (bid/ask real)
+│   └── win_deploy/                  # PACOTE DE DEPLOY — copiar para data/ na nova maquina
+│       ├── super_win_IS.parquet     # Candles + indicadores + sinais (Jan-Mar 2026)
+│       ├── super_win_OOS.parquet    # Candles + indicadores + sinais (Abr 2026)
+│       ├── WIN_merged_all.parquet   # Ticks IS (last prices, Jan-Mar 2026)
+│       ├── WIN_ticks_OOS_all.parquet# Ticks OOS (bid/ask real, Abr 2026)
+│       └── _fev_cache_v2.npz        # Cache Fev pre-computado para F1 screening
+│   # (outros arquivos de dados nao estao no Git — ver secao Dados)
 ├── docs/
 │   ├── GUIA_DE_CICLOS.md           # Pipeline F0-F8 completo
 │   ├── AGENTS.md                    # Regras operacionais e checklist
@@ -69,7 +72,14 @@ Principais: `polars`, `numpy`, `scipy`, `pandas`, `pyarrow`
 
 ### 2. Dados Necessarios
 
-Ver secao "Arquivos de Dados" abaixo.
+Copie o conteudo de `data/win_deploy/` para `data/` na nova maquina:
+
+```bash
+# No ambiente de destino, apos clonar o repo
+cp data/win_deploy/* data/
+```
+
+Isso coloca os 5 arquivos essenciais no lugar correto para o pipeline rodar.
 
 ### 3. Executar Ciclo Completo (1 variante)
 
@@ -116,29 +126,37 @@ python scripts/signal_discovery.py
 
 | Periodo | Dados | Uso |
 |---------|-------|-----|
-| Jan-Mar 2026 | `super_win_continuous.parquet` + `WIN_merged_all.parquet` | IS (In-Sample) |
-| Fev 2026 | `_fev_cache_v2.npz` | F1 Screening |
-| 30/Mar-29/Abr 2026 | `data/ticks/WIN*.parquet` | OOS (Out-of-Sample) |
+| Jan-Mar 2026 | `super_win_IS.parquet` + `WIN_merged_all.parquet` | IS (In-Sample) |
+| Fev 2026 | `super_win_IS.parquet` (subset) + `_fev_cache_v2.npz` | F1 Screening |
+| 30/Mar-29/Abr 2026 | `super_win_OOS.parquet` + `WIN_ticks_OOS_all.parquet` | OOS (Out-of-Sample) |
 
 ---
 
-## Arquivos de Dados (para outro ambiente)
+## Arquivos de Dados
 
-**Nao estao no Git** (ignorados por `.gitignore`). Copiar manualmente:
+**Nenhum arquivo de dados esta no Git** (ignorados por `.gitignore`).
 
-### Obrigatorios
+### Pacote de Deploy (`data/win_deploy/`)
+
+Esta pasta contem **apenas os arquivos essenciais** para rodar o pipeline V7.6. Copie todo o conteudo para `data/` na nova maquina.
+
 | Arquivo | Tamanho (~) | Descricao |
 |---------|-------------|-----------|
-| `data/super_win_continuous.parquet` | 2.7 MB | Candles M5 + 154 indicadores (Jan-Abr 2026) |
-| `data/WIN_merged_all.parquet` | 545 MB | Ticks IS (last prices, Jan-Mar 2026) |
-| `data/_fev_cache_v2.npz` | ~50 MB | Cache Fev pre-computado para F1 screening |
-| `data/ticks/WIN*_ticks_*.parquet` | ~15 MB cada | Ticks OOS diarios (bid/ask real, Abr 2026) |
+| `super_win_IS.parquet` | 2.0 MB | Candles M5 + 317 indicadores/sinais (Jan-Mar 2026) |
+| `super_win_OOS.parquet` | 0.8 MB | Candles M5 + 317 indicadores/sinais (Abr 2026) |
+| `WIN_merged_all.parquet` | 545 MB | Ticks IS (last prices, Jan-Mar 2026) |
+| `WIN_ticks_OOS_all.parquet` | 161 MB | Ticks OOS unificados (bid/ask real, Abr 2026) |
+| `_fev_cache_v2.npz` | ~50 MB | Cache Fev pre-computado para F1 screening |
 
-### Opcionais (variantes/backup)
-| Arquivo | Tamanho (~) | Descricao |
-|---------|-------------|-----------|
-| `data/super_win_continuous_v81.parquet` | 2.9 MB | Versao v81 com sinais adicionais |
-| `data/super_win_continuous_v81_variants.parquet` | 3.0 MB | Versao com 123 variantes PA_SIGNAL_DIR |
+**Total do pacote: ~759 MB**
+
+### Arquivos Legados (ainda suportados, mas nao no pacote deploy)
+
+O orchestrator tambem suporta modo "unificado" (antigo):
+- `super_win_continuous.parquet` — IS+OOS+Fev em um unico arquivo
+- `data/ticks/WIN*_ticks_*.parquet` — Ticks OOS diarios (em vez do unificado)
+
+Se esses arquivos existirem, o orchestrator os usa automaticamente. O modo split (`super_win_IS.parquet` + `super_win_OOS.parquet`) tem prioridade.
 
 ### Cache/Tmp (gerado automaticamente, nao precisa copiar)
 | Arquivo | Tamanho (~) | Nota |

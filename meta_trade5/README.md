@@ -101,6 +101,72 @@ Edite `VARIANTS` no script para escolher quais variantes rodar.
 python scripts/signal_discovery.py
 ```
 
+### 6. Validacao Rapida (grid curto, 1 variante)
+
+Use este script para validar que o pipeline funciona em uma nova maquina ou depois de alteracoes no codigo.
+
+```bash
+python scripts/validate_pipeline.py
+```
+
+**O que faz:**
+- Grid F1: 3x3x2x2 = 36 combos (vs 4,032 do pipeline completo)
+- F2: top 5 do F1 (vs 30 do pipeline completo)
+- Guardrail: 1 combo (vs 36 do pipeline completo)
+- Total esperado: 90-180s (vs 2-5 min do pipeline completo)
+
+**Output:**
+- Tempos detalhados por fase
+- Resultado OOS com trade count e WR
+- Arquivo JSON em `docs/WIN_docs/validate_pipeline_result.json`
+
+---
+
+## Tutorial: Troubleshooting na Nova Maquina
+
+### Erro: "ModuleNotFoundError: No module named 'engines.f1_binario_v4_hybrid'"
+
+**Causa:** O arquivo `engines/f1_binario_v4_hybrid.py` nao esta no GitHub (foi adicionado no commit `14d1a8b`).
+
+**Solucao:**
+```bash
+git pull origin master
+# Verifique se o arquivo existe:
+ls engines/f1_binario_v4_hybrid.py
+```
+
+### Erro: "FileNotFoundError: super_win_IS.parquet"
+
+**Causa:** Arquivos de dados nao foram copiados para `data/`.
+
+**Solucao:**
+```bash
+cp data/win_deploy/* data/
+# Verifique:
+ls data/super_win_IS.parquet
+ls data/WIN_merged_all.parquet
+ls data/WIN_ticks_OOS_all.parquet
+```
+
+### O F2 esta muito lento (minutos por variante)
+
+**Normal.** O F2 roda simulacao tick-by-tick no BacktestEngine. Cada config leva ~2-5s. Com top 30 do F1, sao 30 configs = 60-150s. O guardrail sweep adiciona 36 combos = mais 72-180s.
+
+**Para acelerar:**
+1. Use `validate_pipeline.py` (grid curto, top 5)
+2. Ou edite `N_TOP_F2` e `N_TOP_F3` no `scripts/orchestrator.py`
+3. Ou use `run_signal_variants.py` em vez do autopilot (evita multiplos ciclos)
+
+### Por que o F1 e rapido (~0.01s) mas o F2 e lento (~60s)?
+
+| Fase | Motor | Tipo de Simulacao | Velocidade |
+|------|-------|-------------------|------------|
+| F1 | F1HybridEngine | OHLC puro (high/low) | ~39K combos/s |
+| F2 | BacktestEngine | Tick-by-tick (last prices) | ~0.4 combos/s |
+| F3 OOS | BacktestEngine | Tick-by-tick (bid/ask real) | ~0.5 combos/s |
+
+O F1 e vetorizado (NumPy, multi-thread). O F2/F3 simula cada trade individualmente, verificando cada tick para TP/SL/BE/HP.
+
 ---
 
 ## Configuracao Atual do Orchestrator V7.6

@@ -116,7 +116,12 @@ def log(msg, log_path=None):
 _data_cache = {}
 
 def load_data_once():
-    """Load all data exactly once. Returns dict with all dataframes/arrays."""
+    """Load all data exactly once. Returns dict with all dataframes/arrays.
+    
+    Supports two modes:
+    1. Unified: super_win_continuous.parquet (IS+OOS+Fev in one file)
+    2. Split: super_win_IS.parquet + super_win_OOS.parquet + super_win_Fev.parquet
+    """
     if 'loaded' in _data_cache:
         return _data_cache
     
@@ -125,11 +130,34 @@ def load_data_once():
     print("="*60)
     perf = PerfMonitor()
     
-    # Super parquet
-    df_full = pl.read_parquet(SUPER)
-    perf.tick('super_loaded')
+    # Detect split mode (IS/OOS/Fev as separate files)
+    is_path = os.path.join(BASE, 'super_win_IS.parquet')
+    oos_path = os.path.join(BASE, 'super_win_OOS.parquet')
+    fev_path = os.path.join(BASE, 'super_win_Fev.parquet')
+    split_mode = os.path.exists(is_path) and os.path.exists(oos_path)
     
-    # Regime calculation
+    if split_mode:
+        print("  [SPLIT MODE] Using separate IS/OOS/Fev parquets")
+        df_is = pl.read_parquet(is_path)
+        df_oos = pl.read_parquet(oos_path)
+        df_fev = pl.read_parquet(fev_path) if os.path.exists(fev_path) else df_is.filter(
+            (pl.col('dt') >= FEV_S) & (pl.col('dt') < FEV_E)
+        )
+        # Reconstruct df_full for regime recalculation support
+        df_full = pl.concat([df_is, df_oos]).sort('dt')
+        perf.tick('super_loaded')
+    else:
+        print("  [UNIFIED MODE] Using super_win_continuous.parquet")
+        # Super parquet
+        df_full = pl.read_parquet(SUPER)
+        perf.tick('super_loaded')
+        
+        # Filter periods
+        df_is = df_full.filter((pl.col('dt') >= IS_S) & (pl.col('dt') <= IS_E))
+        df_oos = df_full.filter((pl.col('dt') >= OOS_S) & (pl.col('dt') <= OOS_E))
+        df_fev = df_full.filter((pl.col('dt') >= FEV_S) & (pl.col('dt') < FEV_E))
+    
+    # Regime calculation (on full dataset for consistency)
     close_all = df_full['close'].to_numpy().astype(np.float64)
     adx_all = df_full['ADX7'].to_numpy().astype(np.float64)
     er_all = calc_efficiency_ratio(close_all, window=10)
@@ -138,12 +166,15 @@ def load_data_once():
         pl.Series('efficiency_ratio', np.where(np.isnan(er_all), 0.0, er_all)),
         pl.Series('regime_label', regime_all),
     ])
+    # Propagate regime to IS/OOS if split mode (they may not have it)
+    if split_mode:
+        # Re-read with regime
+        df_is = pl.read_parquet(is_path)
+        df_oos = pl.read_parquet(oos_path)
+        df_fev = pl.read_parquet(fev_path) if os.path.exists(fev_path) else df_is.filter(
+            (pl.col('dt') >= FEV_S) & (pl.col('dt') < FEV_E)
+        )
     perf.tick('regime_calc')
-    
-    # Filter periods
-    df_is = df_full.filter((pl.col('dt') >= IS_S) & (pl.col('dt') <= IS_E))
-    df_oos = df_full.filter((pl.col('dt') >= OOS_S) & (pl.col('dt') <= OOS_E))
-    df_fev = df_full.filter((pl.col('dt') >= FEV_S) & (pl.col('dt') < FEV_E))
     perf.tick('periods_filtered')
     
     # F1 data (cache for ep/atr/hour/entry_idx; OHLC from df_fev for new Hybrid)
@@ -168,18 +199,27 @@ def load_data_once():
     ticks_is = ticks_is.with_columns([pl.col('last').alias('bid'), pl.col('last').alias('ask')])
     perf.tick('is_ticks_loaded')
     
-    # OOS ticks (real bid/ask)
-    all_files = [os.path.join(TICK_DIR, f) for f in os.listdir(TICK_DIR)
-                 if f.startswith('WIN') and f.endswith('.parquet')]
-    all_files.sort()
-    oos_parts = []
-    for p in all_files:
-        part = pl.read_parquet(p)
-        part = part.with_columns([
+    # OOS ticks (real bid/ask) - prefer unified file, fallback to directory
+    oos_ticks_unified = os.path.join(BASE, 'WIN_ticks_OOS_all.parquet')
+    if os.path.exists(oos_ticks_unified):
+        print(f"  [OOS TICKS] Using unified file: WIN_ticks_OOS_all.parquet")
+        ticks_oos = pl.read_parquet(oos_ticks_unified)
+        ticks_oos = ticks_oos.with_columns([
             pl.col('bid').cast(pl.Float64), pl.col('ask').cast(pl.Float64), pl.col('last').cast(pl.Float64),
         ])
-        oos_parts.append(part)
-    ticks_oos = pl.concat(oos_parts).sort('time_msc')
+    else:
+        print(f"  [OOS TICKS] Scanning directory: {TICK_DIR}")
+        all_files = [os.path.join(TICK_DIR, f) for f in os.listdir(TICK_DIR)
+                     if f.startswith('WIN') and f.endswith('.parquet')]
+        all_files.sort()
+        oos_parts = []
+        for p in all_files:
+            part = pl.read_parquet(p)
+            part = part.with_columns([
+                pl.col('bid').cast(pl.Float64), pl.col('ask').cast(pl.Float64), pl.col('last').cast(pl.Float64),
+            ])
+            oos_parts.append(part)
+        ticks_oos = pl.concat(oos_parts).sort('time_msc')
     ticks_oos = ticks_oos.filter((pl.col('bid') > 0) & (pl.col('ask') > 0) & (pl.col('bid') < pl.col('ask')))
     perf.tick('oos_ticks_loaded')
     

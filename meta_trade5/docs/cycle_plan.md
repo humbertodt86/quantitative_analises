@@ -176,3 +176,38 @@ O grid expandido (53,820 combos) convergiu para SL=25.0 em 5/7 variantes, degrad
 **Resultados:** Grid conservador + filtros teve resultados idênticos ao grid 5K original para 5/7 variantes. V2 melhorou para +1,350 (4 trades). S10 piorou drasticamente com SL=0.5. BE convergiu para desabilitado em 6/7.
 
 **Ciclo COMPLETADO em 2026-05-06.**
+
+---
+
+## Ciclo 4: Runner Otimizado — 123 Variantes em <30min (Sem Regime Filter)
+
+**Data:** 2026-05-06
+**Objetivo:** Criar e executar runner otimizado para processar TODAS as 123 variantes PA_SIGNAL_DIR em menos de 30 minutos.
+
+### Contexto
+O pipeline atual (`scripts/run_all_variants.py`) leva ~4-6 horas para 123 variantes porque:
+- F2/F3 usam BacktestEngine tick-by-tick (~40s por variante)
+- Guardrail sweep no IS faz 36 combos tick-by-tick (~100s por variante)
+- O gargalo NAO e o F1 (que e instantaneo com F1HybridEngine)
+
+### Otimizacoes
+1. **F1:** Mantem F1HybridEngine vetorizado (~0.01s, 4032 combos)
+2. **Skip F2/F3:** F1-Exact ≈ F2 (correlacao +0.998), entao F2/F3 sao redundantes
+3. **Skip guardrail IS:** Gargalo de 30-40s por variante. Vai direto para OOS.
+4. **OOS sweep:** Testa apenas 2 configs de guardrail no OOS (BE=200 vs BE=999999)
+5. **Sem filtro de regime:** Testar se o filtro regime=trend estava matando performance
+
+### Passo a Passo
+- [x] Step 1: Criar `scripts/run_all_variants_fast.py`
+- [x] Step 2: Testar com 3 variantes (tempo: 9.8s)
+- [x] Step 3: Executar 123 variantes completas
+- [x] Step 4: Analisar resultados
+- [x] Step 5: Atualizar progress.md
+
+**Resultados:**
+- Tempo: **220.8s (3.7min)** — 25x mais rapido que o estimado do pipeline completo
+- 107/123 variantes (87%) OOS positivo
+- Melhor: S5_Z15_R05 (+7590, 275t, WR=50.5%)
+- Media OOS: +3001
+
+**Ciclo COMPLETADO em 2026-05-06.**

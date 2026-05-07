@@ -1,5 +1,53 @@
 # Progress Report — WIN/WDO Marathon
 
+## 2026-05-06 — Runner Otimizado: 123 Variantes PA_SIGNAL_DIR em 3.7min (Sem Filtro de Regime)
+
+**Objetivo:** Criar runner otimizado que execute 123 variantes em <30min com grid search completo.
+
+**Otimizacoes implementadas (`scripts/run_all_variants_fast.py`):**
+- F1: F1HybridEngine vetorizado (4032 combos em ~0.01s por variante)
+- SKIP F2/F3 tick-by-tick (F1-Exact ≈ F2, correlacao +0.998)
+- SKIP guardrail sweep no IS (gargalo de 30-40s por variante)
+- OOS sweep: testa 2 configs de guardrail direto no OOS (~2-4s cada)
+- Sem filtro de regime (todas as condicoes de mercado)
+
+**Resultados 123 variantes (OOS Abr 2026, SELL):**
+| Metrica | Valor |
+|---------|-------|
+| Tempo total | **220.8s (3.7min)** |
+| Tempo medio por variante | **1.8s** |
+| Variantes OOS positivo | **107/123 (87.0%)** |
+| Melhor OOS | **SIGNAL_DIR_S5_Z15_R05: +7590** (275t, WR=50.5%) |
+| Pior OOS | SIGNAL_DIR_S20_Z20_R08: -3935 (151t, WR=35.1%) |
+| Media OOS | **+3001** |
+
+**Top 10 OOS:**
+| # | Variante | OOS Net | Trades | WR | Config |
+|---|----------|---------|--------|----|--------|
+| 1 | S5_Z15_R05 | +7590 | 275 | 50.5% | TP=2.0 SL=1.5 BE=999999 |
+| 2 | S0_Z15_R05 | +6850 | 323 | 47.7% | TP=2.0 SL=1.5 BE=999999 |
+| 3 | S5_Z10_R03 | +6705 | 194 | 50.5% | TP=2.0 SL=1.0 BE=999999 |
+| 4 | S5_Z15_R08 | +6660 | 200 | 49.0% | TP=2.0 SL=1.5 BE=999999 |
+| 5 | S0_Z10_R03 | +6470 | 249 | 48.2% | TP=2.0 SL=5.0 BE=999999 |
+| 6 | S10_Z15_R05 | +6300 | 234 | 52.1% | TP=2.0 SL=5.0 BE=999999 |
+| 7 | S5_Z10_R05 | +6250 | 189 | 50.8% | TP=2.0 SL=1.0 BE=999999 |
+| 8 | S0_Z30_R08 | +6235 | 304 | 46.7% | TP=2.0 SL=4.0 BE=999999 |
+| 9 | S0_Z15_R08 | +6140 | 237 | 47.7% | TP=2.0 SL=1.5 BE=999999 |
+| 10 | S0_Z10_R05 | +6065 | 252 | 48.0% | TP=2.0 SL=5.0 BE=999999 |
+
+**Descobertas CRITICAS:**
+1. **Filtro de regime estava MATANDO performance:** Com regime=trend, apenas 2/3 variantes eram positivas e com valores menores. Sem filtro: 87% positivas, media +3001.
+2. **BE desabilitado (999999) domina:** Em praticamente todas as variantes, BE=999999 foi melhor que BE=200. O BE estava saindo cedo demais e perdendo movimentos.
+3. **SL curto (1.0-1.5x) funciona melhor no OOS:** Top variantes usam SL=1.0-1.5, nao SL=4.0-5.0 como no IS.
+4. **S5 (slope=5) e S0 (slope=0) sao os melhores:** S5_Z15_R05 (#1) e S0_Z15_R05 (#2) dominam o top 10.
+5. **R=0.5 domina:** 8/10 top variantes usam R=0.5 (range_ratio minimo baixo).
+
+**Arquivos:**
+- `scripts/run_all_variants_fast.py` — Runner otimizado
+- `docs/WIN_docs/all_variants_fast_results_20260506_230013.json` — Resultados completos
+
+---
+
 ## 2026-05-06 — Ciclo 3: Grid Conservador (4,032 combos) + Filtros F1 (SL Floor + R:R Cap)
 
 **Objetivo:** Voltar ao grid conservador e adicionar filtros de sanity no F1 para evitar overfit de micro-stop e precision overfit.

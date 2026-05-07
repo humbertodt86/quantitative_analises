@@ -175,7 +175,8 @@ def run_f1_screening(df_is: pd.DataFrame, variant_col: str, direction: int) -> T
 # ---------------------------------------------------------------------------
 
 def run_f2_gpu(df_is: pd.DataFrame, variant_col: str, direction: int,
-               top30_f1: List[Dict], batch_size: int = GPU_BATCH_SIZE) -> Tuple[pd.DataFrame, float]:
+               top30_f1: List[Dict], batch_size: int = GPU_BATCH_SIZE,
+               use_grid_advisor: bool = True) -> Tuple[pd.DataFrame, float]:
     """
     Roda F2 optimization na GPU.
     Usa GridAdvisor para decidir se fixa TP/SL/ATR ou refina.
@@ -183,8 +184,14 @@ def run_f2_gpu(df_is: pd.DataFrame, variant_col: str, direction: int,
     """
     start = time.time()
     
-    # GridAdvisor: analisa estabilidade do F1 top 3
-    f1_stable, reason = analyze_f1_stability(top30_f1[:3])
+    # GridAdvisor: analisa estabilidade do F1 top 3 (se ativado)
+    if use_grid_advisor:
+        f1_stable, reason = analyze_f1_stability(top30_f1[:3])
+        print(f"      GridAdvisor: {reason}")
+    else:
+        f1_stable = False
+        reason = "DESATIVADO (--no-grid-advisor)"
+        print(f"      GridAdvisor: {reason}")
     
     # Detecta familia do sinal pelo nome da coluna base
     signal_name = variant_col.split('_')[0] if '_' in variant_col else variant_col
@@ -305,7 +312,8 @@ def run_f3_oos(df_oos: pl.DataFrame, ticks_oos: pl.DataFrame,
 # ---------------------------------------------------------------------------
 
 def process_variant(df_is: pd.DataFrame, df_oos_base: pl.DataFrame, ticks_oos: pl.DataFrame,
-                    sig_path: str, variant_col: str, direction: int, batch_size: int) -> Dict:
+                    sig_path: str, variant_col: str, direction: int, batch_size: int,
+                    use_grid_advisor: bool = True) -> Dict:
     """Processa uma variante completa: F1 → F2 GPU → F3 OOS."""
     
     print(f"\n{'='*80}")
@@ -338,7 +346,7 @@ def process_variant(df_is: pd.DataFrame, df_oos_base: pl.DataFrame, ticks_oos: p
     
     # --- F2 GPU ---
     print("\n[2/3] F2 Optimization (GPU)...")
-    df_f2, t_f2 = run_f2_gpu(df_is, variant_col, direction, top30_f1, batch_size)
+    df_f2, t_f2 = run_f2_gpu(df_is, variant_col, direction, top30_f1, batch_size, use_grid_advisor)
     print(f"      F2: {len(df_f2)} validos em {t_f2:.2f}s")
     if len(df_f2) == 0:
         return {**result, 'status': 'abort', 'reason': 'f2_no_results'}
@@ -396,7 +404,11 @@ def main():
     parser.add_argument('--limit', type=int, default=0, help='Limite de variantes (0=todos)')
     parser.add_argument('--batch-size', type=int, default=GPU_BATCH_SIZE, help='GPU batch size')
     parser.add_argument('--signal-file', type=str, default='', help='Processar apenas 1 arquivo PA_*.parquet')
+    parser.add_argument('--grid-advisor', action='store_true', default=True, help='Ativar GridAdvisor (default)')
+    parser.add_argument('--no-grid-advisor', action='store_true', default=False, help='Desativar GridAdvisor (refina sempre)')
     args = parser.parse_args()
+    
+    use_grid_advisor = not args.no_grid_advisor
     
     tracking = load_tracking()
     
@@ -469,7 +481,7 @@ def main():
         
         for v_idx, variant_col in enumerate(remaining, 1):
             t_variant = time.time()
-            result = process_variant(df_is, df_oos_base, ticks_oos, sig_path, variant_col, args.signal, args.batch_size)
+            result = process_variant(df_is, df_oos_base, ticks_oos, sig_path, variant_col, args.signal, args.batch_size, use_grid_advisor)
             result['signal_name'] = signal_name
             result['elapsed_total'] = time.time() - t_variant
             all_results.append(result)

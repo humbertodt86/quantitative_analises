@@ -1,11 +1,4 @@
 signal_variant,block_reason,pct_of_pnl,projected_pnl_if_blocked
 PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s0_z2.5_r0.3,hit_SL_negative,92.39,25925
-PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s20_z2.5_r0.3,hit_SL_negative,82.46,20755
-PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s10_z3.0_r0.3,hit_SL_negative,88.34,22300
-PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s10_z3.5_r0.3,hit_SL_negative,88.34,22300
-PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s20_z3.0_r0.3,hit_SL_negative,80.84,20155
-PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s20_z3.5_r0.3,hit_SL_negative,80.84,20155
-PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s10_z2.5_r0.3,hit_SL_negative,87.61,20975
 PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s0_z3.0_r0.3,hit_SL_negative,109.31,25400
 PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s0_z3.5_r0.3,hit_SL_negative,109.31,25400
-PA_SIGNAL_DIR_/PA_SIGNAL_DIR_s10_z2.5_r0.5,hit_SL_negative,103.64,20445

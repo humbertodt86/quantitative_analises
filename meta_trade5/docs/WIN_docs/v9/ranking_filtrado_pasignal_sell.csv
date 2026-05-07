@@ -1,0 +1,4 @@
+rank,signal,variant,f3_net,f3_n,f3_wr,f3_pf,tp,sl,atr_min,atr_max,be_offset,grace_candles,cooldown_candles,slope_decay,filters_passed,positive_days_pct,max_pnl_share_pct,filter_reasons
+1,PA_SIGNAL_DIR_,PA_SIGNAL_DIR_s0_z2.5_r0.3,8585,163,50.9,2.04,3.5,8.0,50.0,200.0,200.0,8,0,0.8,True,77.4,7.8,
+2,PA_SIGNAL_DIR_,PA_SIGNAL_DIR_s0_z3.0_r0.3,6855,176,53.4,1.89,2.5,8.0,50.0,200.0,200.0,8,2,0.8,True,77.4,7.6,
+3,PA_SIGNAL_DIR_,PA_SIGNAL_DIR_s0_z3.5_r0.3,6855,176,53.4,1.89,2.5,8.0,50.0,200.0,200.0,8,2,0.8,True,77.4,7.6,

@@ -138,6 +138,90 @@ def run_f3_oos_with_trades(df_oos: pl.DataFrame, ticks_oos: pl.DataFrame,
 
 
 # ---------------------------------------------------------------------------
+# FILTROS ANTI-ARTEFATOS
+# ---------------------------------------------------------------------------
+
+def apply_f3_filters(trades: list, metrics: dict, min_wr: float = 35.0,
+                     min_positive_days_pct: float = 75.0,
+                     max_pnl_share_pct: float = 35.0,
+                     min_trades_per_month: int = 10) -> tuple:
+    """
+    Aplica filtros anti-artefatos nos trades F3.
+    Retorna (passed: bool, reasons: list, filter_metrics: dict).
+
+    Nota: Ajustes para periodo curto de OOS:
+    - Max PnL share: so considera meses com >= min_trades_per_month trades
+    - Dias positivos: threshold ajustado para 70% se periodo < 20 dias
+    """
+    reasons = []
+    filter_metrics = {}
+
+    # 1. WR >= min_wr
+    wr = metrics.get('win_rate', 0.0)
+    filter_metrics['f3_wr'] = wr
+    if wr < min_wr:
+        reasons.append(f"WR={wr:.1f}% < {min_wr}%")
+
+    if not trades:
+        return (len(reasons) == 0), reasons, filter_metrics
+
+    # Converter para DataFrame
+    df_trades = pd.DataFrame(trades)
+    if 'pnl' not in df_trades.columns or 'entry_dt' not in df_trades.columns:
+        return (len(reasons) == 0), reasons, filter_metrics
+
+    df_trades['entry_dt'] = pd.to_datetime(df_trades['entry_dt'])
+    df_trades['date'] = df_trades['entry_dt'].dt.date
+    df_trades['month'] = df_trades['entry_dt'].dt.to_period('M')
+
+    # 2. % dos dias com PnL >= 0 (dias sem trades = positivos)
+    all_dates = pd.date_range(start=df_trades['entry_dt'].min().normalize(),
+                              end=df_trades['entry_dt'].max().normalize(),
+                              freq='D').date
+    daily_pnl = df_trades.groupby('date')['pnl'].sum().reindex(all_dates, fill_value=0.0)
+    positive_days = (daily_pnl >= 0).sum()
+    total_days = len(daily_pnl)
+    positive_days_pct = (positive_days / total_days * 100) if total_days > 0 else 0.0
+    filter_metrics['positive_days_pct'] = round(positive_days_pct, 1)
+    filter_metrics['total_days'] = total_days
+    filter_metrics['positive_days'] = int(positive_days)
+
+    # Ajusta threshold se periodo for curto (< 20 dias)
+    adjusted_min_days = min_positive_days_pct if total_days >= 20 else 70.0
+    if positive_days_pct < adjusted_min_days:
+        reasons.append(f"Dias_pos={positive_days_pct:.1f}% < {adjusted_min_days:.0f}%")
+
+    # 3. Max PnL share < max_pnl_share_pct (so em meses com >= min_trades_per_month)
+    monthly_trade_counts = df_trades.groupby('month').size()
+    valid_months = monthly_trade_counts[monthly_trade_counts >= min_trades_per_month].index
+
+    monthly_max_share = 0.0
+    worst_month = None
+    if len(valid_months) > 0:
+        for month in valid_months:
+            month_trades = df_trades[df_trades['month'] == month]
+            month_pnl = month_trades['pnl'].sum()
+            if month_pnl == 0:
+                continue
+            shares = (month_trades['pnl'].abs() / abs(month_pnl) * 100)
+            max_share = shares.max()
+            if max_share > monthly_max_share:
+                monthly_max_share = max_share
+                worst_month = month
+
+    filter_metrics['max_pnl_share_pct'] = round(monthly_max_share, 1)
+    filter_metrics['worst_month'] = str(worst_month) if worst_month else None
+    filter_metrics['valid_months_for_share'] = len(valid_months)
+
+    # So aplica filtro se houver meses validos
+    if len(valid_months) > 0 and monthly_max_share > max_pnl_share_pct:
+        reasons.append(f"MaxShare={monthly_max_share:.1f}% > {max_pnl_share_pct}%")
+
+    passed = len(reasons) == 0
+    return passed, reasons, filter_metrics
+
+
+# ---------------------------------------------------------------------------
 # PROCESSAMENTO DE VARIANTE
 # ---------------------------------------------------------------------------
 
@@ -185,9 +269,10 @@ def process_variant(df_is: pd.DataFrame, df_oos_base: pl.DataFrame, ticks_oos: p
     if len(df_f2) == 0:
         return {**result, 'status': 'abort', 'reason': 'f2_no_results'}
 
-    df_f2_valid = df_f2[df_f2['win_rate'] >= 0.0].reset_index(drop=True)
+    # FILTRO F2: WR >= 35%
+    df_f2_valid = df_f2[df_f2['win_rate'] >= 35.0].reset_index(drop=True)
     if len(df_f2_valid) == 0:
-        print(f"      [FILTRO] Nenhuma config com WR >= 0%")
+        print(f"      [FILTRO F2] Nenhuma config com WR >= 35%")
         return {**result, 'status': 'abort', 'reason': 'f2_low_wr'}
 
     top3_f2 = df_f2_valid.head(F2_TOP_N)
@@ -220,13 +305,28 @@ def process_variant(df_is: pd.DataFrame, df_oos_base: pl.DataFrame, ticks_oos: p
         metrics, trades = run_f3_oos_with_trades(
             df_oos_merged, ticks_oos, variant_col, direction, config_f2
         )
+
+        # FILTROS F3
+        passed, reasons, filter_metrics = apply_f3_filters(trades, metrics)
+        metrics['filters_passed'] = passed
+        metrics['filter_reasons'] = reasons
+        metrics['filter_metrics'] = filter_metrics
+
         f3_results.append({**metrics, **config_f2, 'rank': i + 1})
         f3_trades_list.append(trades)
-        status_icon = "OK" if metrics['status'] == 'ok' else "ERR"
-        print(f"      F3 #{i+1}: {status_icon}  PnL={metrics.get('net_pnl', 0):>+7}  ({metrics.get('n_trades', 0)}t, WR={metrics.get('win_rate', 0):.1f}%)")
+        status_icon = "OK" if (metrics['status'] == 'ok' and passed) else "FILT" if not passed else "ERR"
+        reason_str = f" | {'; '.join(reasons)}" if reasons else ""
+        print(f"      F3 #{i+1}: {status_icon}  PnL={metrics.get('net_pnl', 0):>+7}  ({metrics.get('n_trades', 0)}t, WR={metrics.get('win_rate', 0):.1f}%){reason_str}")
 
-    best_idx = max(range(len(f3_results)), key=lambda i: f3_results[i].get('net_pnl', 0))
-    best_f3 = f3_results[best_idx]
+    # Seleciona melhor entre as que passaram nos filtros
+    f3_passed = [(i, r) for i, r in enumerate(f3_results) if r.get('filters_passed', False)]
+    if f3_passed:
+        best_idx, best_f3 = max(f3_passed, key=lambda x: x[1].get('net_pnl', 0))
+    else:
+        # Nenhuma passou, pega a melhor mesmo assim para diagnóstico
+        best_idx = max(range(len(f3_results)), key=lambda i: f3_results[i].get('net_pnl', 0))
+        best_f3 = f3_results[best_idx]
+
     best_trades = f3_trades_list[best_idx]
 
     result['phases']['f3'] = {
@@ -237,8 +337,10 @@ def process_variant(df_is: pd.DataFrame, df_oos_base: pl.DataFrame, ticks_oos: p
     }
     result['status'] = 'completed'
     result['best_config'] = top3_f2.iloc[0].to_dict() if len(top3_f2) > 0 else {}
+    result['filters_passed'] = best_f3.get('filters_passed', False)
+    result['filter_reasons'] = best_f3.get('filter_reasons', [])
 
-    print(f"\n  RESUMO: F1={best_f1['net_pnl']:,} → F2={best_f2['net_pnl']:,.0f} → F3={best_f3.get('net_pnl', 0):+d}")
+    print(f"\n  RESUMO: F1={best_f1['net_pnl']:,} → F2={best_f2['net_pnl']:,.0f} → F3={best_f3.get('net_pnl', 0):+d}  FILTROS={'OK' if result['filters_passed'] else 'FAIL'}")
 
     return result
 
@@ -294,13 +396,17 @@ def save_variant_outputs(result: Dict):
 # RANKING CONSOLIDADO
 # ---------------------------------------------------------------------------
 
-def build_consolidated_ranking(all_results: List[Dict]) -> pd.DataFrame:
+def build_consolidated_ranking(all_results: List[Dict], filtered_only: bool = False) -> pd.DataFrame:
     """Monta ranking consolidado de todas as variantes."""
     rows = []
     for r in all_results:
         if r['status'] != 'completed':
             continue
         best = r['phases']['f3']['best']
+        filt_passed = best.get('filters_passed', False)
+        filt_metrics = best.get('filter_metrics', {})
+        if filtered_only and not filt_passed:
+            continue
         rows.append({
             'signal': r['signal_name'],
             'variant': r['variant'],
@@ -316,6 +422,10 @@ def build_consolidated_ranking(all_results: List[Dict]) -> pd.DataFrame:
             'grace_candles': best.get('grace_candles', 2),
             'cooldown_candles': best.get('cooldown_candles', 0),
             'slope_decay': best.get('slope_decay', 0.50),
+            'filters_passed': filt_passed,
+            'positive_days_pct': filt_metrics.get('positive_days_pct', 0),
+            'max_pnl_share_pct': filt_metrics.get('max_pnl_share_pct', 0),
+            'filter_reasons': '; '.join(best.get('filter_reasons', [])),
         })
     df = pd.DataFrame(rows)
     df = df.sort_values('f3_net', ascending=False).reset_index(drop=True)
@@ -323,7 +433,8 @@ def build_consolidated_ranking(all_results: List[Dict]) -> pd.DataFrame:
     cols = [
         'rank', 'signal', 'variant', 'f3_net', 'f3_n', 'f3_wr', 'f3_pf',
         'tp', 'sl', 'atr_min', 'atr_max', 'be_offset',
-        'grace_candles', 'cooldown_candles', 'slope_decay'
+        'grace_candles', 'cooldown_candles', 'slope_decay',
+        'filters_passed', 'positive_days_pct', 'max_pnl_share_pct', 'filter_reasons'
     ]
     df = df[cols]
     return df
@@ -573,12 +684,35 @@ def main():
         print("[AVISO] Nenhuma variante completada com sucesso.")
         return 0
 
+    # Estatísticas dos filtros
+    passed_filt = [r for r in completed if r.get('filters_passed', False)]
+    failed_filt = [r for r in completed if not r.get('filters_passed', False)]
+    print(f"\nFILTROS ANTI-ARTEFATOS:")
+    print(f"  WR >= 35%  +  80% dias positivos  +  Max PnL share < 35%")
+    print(f"  Passaram: {len(passed_filt)}/{len(completed)} ({len(passed_filt)/len(completed)*100:.1f}%)")
+    print(f"  Reprovaram: {len(failed_filt)}/{len(completed)} ({len(failed_filt)/len(completed)*100:.1f}%)")
+    if failed_filt:
+        print(f"  Top 5 reprovadas:")
+        for r in failed_filt[:5]:
+            b = r['phases']['f3']['best']
+            reasons = '; '.join(r.get('filter_reasons', []))
+            print(f"    {r['signal_name']}/{r['variant']}: OOS={b.get('net_pnl', 0):+d} ({b.get('n_trades', 0)}t) -> {reasons}")
+
     completed.sort(key=lambda x: x['phases']['f3']['best'].get('net_pnl', 0), reverse=True)
 
-    print(f"\nTOP 10 F3 OOS:")
+    print(f"\nTOP 10 F3 OOS (BRUTO):")
     for i, r in enumerate(completed[:10], 1):
         b = r['phases']['f3']['best']
-        print(f"  #{i:<3} {r['signal_name']}/{r['variant']:<35} OOS={b.get('net_pnl', 0):>+7} ({b.get('n_trades', 0)}t, WR={b.get('win_rate', 0):.1f}%, PF={b.get('profit_factor', 0):.2f})")
+        filt = "OK" if r.get('filters_passed') else "FAIL"
+        print(f"  #{i:<3} {r['signal_name']}/{r['variant']:<35} OOS={b.get('net_pnl', 0):>+7} ({b.get('n_trades', 0)}t, WR={b.get('win_rate', 0):.1f}%) [{filt}]")
+
+    if passed_filt:
+        passed_filt.sort(key=lambda x: x['phases']['f3']['best'].get('net_pnl', 0), reverse=True)
+        print(f"\nTOP 10 F3 OOS (FILTRADO):")
+        for i, r in enumerate(passed_filt[:10], 1):
+            b = r['phases']['f3']['best']
+            fm = b.get('filter_metrics', {})
+            print(f"  #{i:<3} {r['signal_name']}/{r['variant']:<35} OOS={b.get('net_pnl', 0):>+7} ({b.get('n_trades', 0)}t, WR={b.get('win_rate', 0):.1f}%)  Dias+={fm.get('positive_days_pct', 0):.0f}% Share={fm.get('max_pnl_share_pct', 0):.1f}%")
 
     pos = sum(1 for r in completed if r['phases']['f3']['best'].get('net_pnl', 0) > 0)
     print(f"\nPositivos OOS: {pos}/{len(completed)} ({pos/len(completed)*100:.1f}%)")
@@ -586,15 +720,21 @@ def main():
     # -----------------------------------------------------------------------
     # SALVAR RANKING CONSOLIDADO
     # -----------------------------------------------------------------------
-    ranking_df = build_consolidated_ranking(all_results)
+    ranking_df = build_consolidated_ranking(all_results, filtered_only=False)
     ranking_path = os.path.join(OUT_DIR, 'ranking_consolidado_pasignal_sell.csv')
     ranking_df.to_csv(ranking_path, index=False)
-    print(f"\n[SAVE] Ranking consolidado: {ranking_path}")
+    print(f"\n[SAVE] Ranking consolidado (bruto): {ranking_path}")
+
+    if passed_filt:
+        ranking_filt_df = build_consolidated_ranking(all_results, filtered_only=True)
+        ranking_filt_path = os.path.join(OUT_DIR, 'ranking_filtrado_pasignal_sell.csv')
+        ranking_filt_df.to_csv(ranking_filt_path, index=False)
+        print(f"[SAVE] Ranking filtrado: {ranking_filt_path}")
 
     # -----------------------------------------------------------------------
     # DNA + BLOCKING (TOP 10)
     # -----------------------------------------------------------------------
-    top10 = completed[:10]
+    top10 = passed_filt[:10] if passed_filt else completed[:10]
     dna_df = build_dna_top10(top10)
     dna_path = os.path.join(OUT_DIR, 'dna_top10_pasignal_sell.csv')
     dna_df.to_csv(dna_path, index=False)

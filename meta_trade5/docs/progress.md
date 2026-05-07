@@ -1,5 +1,35 @@
 # Progress Report — WIN/WDO Marathon
 
+## 2026-05-07 — F2 Optimization GPU V9.0 (CUDA RawKernel)
+
+**Objetivo:** Criar versao do F2 que execute na GPU RTX 4060, corrigindo os guardrails que v8.7 ignorava.
+
+**Correcoes vs v8.7:**
+- BE (Break Even): move SL para entrada quando lucro >= be_offset
+- Grace Candles: ignora SL nos primeiros N candles apos entrada
+- Slope Decay: move SL para BE quando EMA5 slope cai abaixo do threshold
+- sr_threshold_pct: default 1.15 quando nao definido no family_config
+
+**Performance:**
+| Metrica | Valor |
+|---------|-------|
+| GPU | RTX 4060 Laptop 8GB |
+| Combos testados | 151,875 |
+| Tempo GPU | **2.1s** |
+| Throughput | ~72,000 combos/s |
+| Válidos (>=10 trades) | 145,800 |
+| Speedup vs v8.7 serial | **~50x** (estimado) |
+
+**Resultados PA_SIGNAL_DIR BUY (s0_z1p5_r0p5):**
+- Top 1: PnL=R$ 14,901, Trades=66, WR=62.1%
+- Config: TP=4.8, SL=0.8, ATR=[320-540], BE=200, Grace=8, Slope=0.50
+- GridAdvisor: OK (PnL 88% do F1, Trades 550%)
+
+**Arquivos:**
+- `engines/f2_optimization_gpu.py` — F2 completo com kernel CUDA
+
+---
+
 ## 2026-05-06 — Runner Otimizado: 123 Variantes PA_SIGNAL_DIR em 3.7min (Sem Filtro de Regime)
 
 **Objetivo:** Criar runner otimizado que execute 123 variantes em <30min com grid search completo.

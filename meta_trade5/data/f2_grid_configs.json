@@ -1,0 +1,242 @@
+{
+  "_metadata": {
+    "description": "F2 Grid Configurations by Signal Family",
+    "version": "V9.0",
+    "created": "2026-05-04",
+    "updated": "2026-05-07",
+    "philosophy": "F1 descarta o lixo, F2 refina o ouro"
+  },
+
+  "trend": {
+    "_description": "Trend Following - Trades duram mais, TP/SL altos, deixa lucro correr",
+    "family_signals": [
+      "PA_SIGNAL_DIR",
+      "PA_SIGNAL_DIR_V2",
+      "PA_STRONG_TREND_A25_S20",
+      "PA_SLOPE_TREND_S25_A25"
+    ],
+    "tp_sl_atr": {
+      "tp_mult": [1.5, 1.8, 2.0, 2.2, 2.5],
+      "sl_mult": [4.0, 4.5, 5.0, 5.5, 6.0],
+      "atr_min": [150, 180, 200, 220, 250],
+      "atr_max": [600, 680, 800, 920, 1000],
+      "refine_factor": 0.20,
+      "num_values": 5
+    },
+    "sr_buffers": {
+      "tp_sr_pct": [0.80, 0.90, 1.00],
+      "sl_sr_pct": [1.10, 1.15, 1.20],
+      "sr_threshold_pct": [1.05, 1.10, 1.15, 1.20, 1.25]
+    },
+    "guardrails": {
+      "be_offset": [50, 100, 200],
+      "grace_candles": [4, 6, 8],
+      "cooldown_candles": [0, 2],
+      "max_sl_consec": [5, 99],
+      "slope_decay": [0.50, 0.65, 0.80]
+    },
+    "filters": {
+      "book_imb_thresh": [0.0, 0.1, 0.2],
+      "cum_delta_thresh": [-0.5, 0.0, 0.5]
+    }
+  },
+
+  "mean_reversion": {
+    "_description": "Mean Reversion - Trades rapidos, TP/SL baixos, volta para media",
+    "family_signals": [
+      "PA_SIGNAL_REV",
+      "PA_REV_RSI_UNIFIED",
+      "PA_VWAP_REV_D1_0",
+      "PA_VWAP_Z_Z2_0",
+      "PA_POC_REV"
+    ],
+    "tp_sl_atr": {
+      "tp_mult": [0.8, 0.9, 1.0, 1.1, 1.2],
+      "sl_mult": [2.0, 2.3, 2.5, 2.7, 3.0],
+      "atr_min": [120, 140, 150, 160, 180],
+      "atr_max": [320, 360, 400, 440, 480],
+      "refine_factor": 0.20,
+      "num_values": 5
+    },
+    "sr_buffers": {
+      "tp_sr_pct": [0.70, 0.80, 0.90],
+      "sl_sr_pct": [1.05, 1.10, 1.15],
+      "sr_threshold_pct": [1.05, 1.10, 1.15, 1.20, 1.25]
+    },
+    "guardrails": {
+      "be_offset": [20, 50, 100],
+      "grace_candles": [2, 4, 6],
+      "cooldown_candles": [0, 2],
+      "max_sl_consec": [5, 99],
+      "slope_decay": [0.50, 0.65, 0.80]
+    },
+    "filters": {
+      "book_imb_thresh": [0.0, 0.1, 0.2],
+      "cum_delta_thresh": [-0.5, 0.0, 0.5]
+    }
+  },
+
+  "breakout": {
+    "_description": "Breakout - Trades explosivos, captura expansao de volatilidade",
+    "family_signals": [
+      "PA_ADX_BREAK_A25",
+      "PA_GK_BREAK_G0_001",
+      "PA_EXHAUST_Dn1_0_M40"
+    ],
+    "tp_sl_atr": {
+      "tp_mult": [1.2, 1.4, 1.5, 1.6, 1.8],
+      "sl_mult": [2.8, 3.2, 3.5, 3.8, 4.2],
+      "atr_min": [160, 180, 200, 220, 240],
+      "atr_max": [480, 540, 600, 660, 720],
+      "refine_factor": 0.20,
+      "num_values": 5
+    },
+    "sr_buffers": {
+      "tp_sr_pct": [0.90, 1.00, 1.10],
+      "sl_sr_pct": [1.05, 1.10, 1.15],
+      "sr_threshold_pct": [1.05, 1.10, 1.15, 1.20, 1.25]
+    },
+    "guardrails": {
+      "be_offset": [50, 100, 150],
+      "grace_candles": [2, 4, 6],
+      "cooldown_candles": [0, 2],
+      "max_sl_consec": [5, 99],
+      "slope_decay": [0.50, 0.65, 0.80]
+    },
+    "filters": {
+      "book_imb_thresh": [0.0, 0.1, 0.2],
+      "cum_delta_thresh": [-0.5, 0.0, 0.5]
+    }
+  },
+
+  "liquidity_grab": {
+    "_description": "Liquidity Grab - Reversao apos sweep de liquidez",
+    "family_signals": [
+      "PA_LIQ_GRAB",
+      "PA_VCP_C0_6"
+    ],
+    "tp_sl_atr": {
+      "tp_mult": [2.4, 2.7, 3.0, 3.3, 3.6],
+      "sl_mult": [4.8, 5.4, 6.0, 6.6, 7.2],
+      "atr_min": [240, 270, 300, 330, 360],
+      "atr_max": [800, 900, 1000, 1100, 1200],
+      "refine_factor": 0.20,
+      "num_values": 5
+    },
+    "sr_buffers": {
+      "tp_sr_pct": [0.70, 0.80, 0.90],
+      "sl_sr_pct": [1.15, 1.20, 1.25],
+      "sr_threshold_pct": [1.05, 1.10, 1.15, 1.20, 1.25]
+    },
+    "guardrails": {
+      "be_offset": [100, 200, 300],
+      "grace_candles": [6, 8, 10],
+      "cooldown_candles": [0, 2],
+      "max_sl_consec": [5, 99],
+      "slope_decay": [0.50, 0.65, 0.80]
+    },
+    "filters": {
+      "book_imb_thresh": [0.0, 0.1, 0.2],
+      "cum_delta_thresh": [-0.5, 0.0, 0.5]
+    }
+  },
+
+  "regime": {
+    "_description": "Regime/Classifier - Operam em regime especifico, filtros secundarios",
+    "family_signals": [
+      "PA_EFF_RATIO_E0_6",
+      "PA_CHOP_C38_2",
+      "PA_TUESDAY",
+      "PA_MFI_B20",
+      "PA_TSI_T25"
+    ],
+    "tp_sl_atr": {
+      "tp_mult": [1.5, 1.8, 2.0, 2.2, 2.5],
+      "sl_mult": [3.0, 3.5, 4.0, 4.5, 5.0],
+      "atr_min": [120, 140, 150, 160, 180],
+      "atr_max": [480, 540, 600, 660, 720],
+      "refine_factor": 0.25,
+      "num_values": 5
+    },
+    "sr_buffers": {
+      "tp_sr_pct": [0.80, 0.90, 1.00],
+      "sl_sr_pct": [1.10, 1.15, 1.20],
+      "sr_threshold_pct": [1.05, 1.10, 1.15, 1.20, 1.25]
+    },
+    "guardrails": {
+      "be_offset": [50, 100, 200],
+      "grace_candles": [4, 6, 8],
+      "cooldown_candles": [0, 2],
+      "max_sl_consec": [5, 99],
+      "slope_decay": [0.50, 0.65, 0.80]
+    },
+    "filters": {
+      "book_imb_thresh": [0.0, 0.1, 0.2],
+      "cum_delta_thresh": [-0.5, 0.0, 0.5]
+    }
+  },
+
+  "crossover": {
+    "_description": "Crossover (MA Cross) - Cruzamentos de medias, trend following",
+    "family_signals": [
+      "PA_MA_CROSS_F9_S21",
+      "PA_SMA_CROSS_F5_S10"
+    ],
+    "tp_sl_atr": {
+      "tp_mult": [1.5, 1.8, 2.0, 2.2, 2.5],
+      "sl_mult": [4.0, 4.5, 5.0, 5.5, 6.0],
+      "atr_min": [150, 180, 200, 220, 250],
+      "atr_max": [600, 680, 800, 920, 1000],
+      "refine_factor": 0.20,
+      "num_values": 5
+    },
+    "sr_buffers": {
+      "tp_sr_pct": [0.80, 0.90, 1.00],
+      "sl_sr_pct": [1.10, 1.15, 1.20],
+      "sr_threshold_pct": [1.05, 1.10, 1.15, 1.20, 1.25]
+    },
+    "guardrails": {
+      "be_offset": [50, 100, 200],
+      "grace_candles": [4, 6, 8],
+      "cooldown_candles": [0, 2],
+      "max_sl_consec": [5, 99],
+      "slope_decay": [0.50, 0.65, 0.80]
+    },
+    "filters": {
+      "book_imb_thresh": [0.0, 0.1, 0.2],
+      "cum_delta_thresh": [-0.5, 0.0, 0.5]
+    }
+  },
+
+  "volatility": {
+    "_description": "Volatility Envelopes (BB, Keltner) - Mean reversion em bandas",
+    "family_signals": [
+      "PA_BB_M2_0",
+      "PA_KELT_ATR_M2_0"
+    ],
+    "tp_sl_atr": {
+      "tp_mult": [0.8, 0.9, 1.0, 1.1, 1.2],
+      "sl_mult": [2.0, 2.3, 2.5, 2.7, 3.0],
+      "atr_min": [120, 140, 150, 160, 180],
+      "atr_max": [320, 360, 400, 440, 480],
+      "refine_factor": 0.20,
+      "num_values": 5
+    },
+    "sr_buffers": {
+      "tp_sr_pct": [0.70, 0.80, 0.90],
+      "sl_sr_pct": [1.05, 1.10, 1.15],
+      "sr_threshold_pct": [1.05, 1.10, 1.15, 1.20, 1.25]
+    },
+    "guardrails": {
+      "be_offset": [20, 50, 100],
+      "grace_candles": [2, 4, 6],
+      "cooldown_candles": [0, 2],
+      "max_sl_consec": [5, 99],
+      "slope_decay": [0.50, 0.65, 0.80]
+    },
+    "filters": {
+      "book_imb_thresh": [0.0, 0.1, 0.2],
+      "cum_delta_thresh": [-0.5, 0.0, 0.5]
+    }
+  }
+}
